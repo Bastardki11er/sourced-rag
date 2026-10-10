@@ -1,0 +1,48 @@
+{"id": "l01", "question": "What does error code KR-4021 mean?", "kind": "lexical", "gold": [{"source": "error-codes.md", "section": "Payload errors"}], "answer_contains": ["600 kg"]}
+{"id": "l02", "question": "What is the command to roll back a release?", "kind": "lexical", "gold": [{"source": "deployment.md", "section": "Rolling back"}], "answer_contains": ["kctl rollback"]}
+{"id": "l03", "question": "When does the on-call handoff happen?", "kind": "lexical", "gold": [{"source": "oncall.md", "section": "Rotation schedule"}], "answer_contains": ["Tuesday", "10:00"]}
+{"id": "l04", "question": "How quickly must a SEV1 page be acknowledged?", "kind": "lexical", "gold": [{"source": "oncall.md", "section": "Severity levels"}], "answer_contains": ["5 minutes"]}
+{"id": "l05", "question": "How many approvals do changes under the critical/ directory need?", "kind": "lexical", "gold": [{"source": "code-review.md", "section": "Approvals"}], "answer_contains": ["two"]}
+{"id": "l06", "question": "What is the on-call stipend for a week as primary?", "kind": "lexical", "gold": [{"source": "oncall.md", "section": "Compensation and time off"}], "answer_contains": ["$400"]}
+{"id": "l07", "question": "How often must credentials be rotated?", "kind": "lexical", "gold": [{"source": "security.md", "section": "Secrets management"}], "answer_contains": ["90 days"]}
+{"id": "l08", "question": "What is the rate limit for an API token?", "kind": "lexical", "gold": [{"source": "api-guidelines.md", "section": "Rate limits"}], "answer_contains": ["600"]}
+{"id": "l09", "question": "What is the maximum page size for list endpoints?", "kind": "lexical", "gold": [{"source": "api-guidelines.md", "section": "Pagination"}], "answer_contains": ["200"]}
+{"id": "l10", "question": "How many PTO days can be carried over into the next year?", "kind": "lexical", "gold": [{"source": "pto-and-leave.md", "section": "Carryover"}], "answer_contains": ["5"]}
+{"id": "l11", "question": "How long is parental leave?", "kind": "lexical", "gold": [{"source": "pto-and-leave.md", "section": "Parental leave"}], "answer_contains": ["16 weeks"]}
+{"id": "l12", "question": "What is the meal per diem while traveling?", "kind": "lexical", "gold": [{"source": "expenses-and-travel.md", "section": "Meals and per diem"}], "answer_contains": ["$75"]}
+{"id": "l13", "question": "When are performance reviews held?", "kind": "lexical", "gold": [{"source": "performance-reviews.md", "section": "Review cycle"}], "answer_contains": ["April", "October"]}
+{"id": "l14", "question": "How long is raw telemetry retained?", "kind": "lexical", "gold": [{"source": "data-retention.md", "section": "Telemetry"}], "answer_contains": ["13 months"]}
+{"id": "l15", "question": "When is the company-wide deploy freeze?", "kind": "lexical", "gold": [{"source": "deployment.md", "section": "Deploy freezes"}], "answer_contains": ["December 15", "January 2"]}
+{"id": "l16", "question": "What percentage of customer sites get the canary release?", "kind": "lexical", "gold": [{"source": "deployment.md", "section": "Canary rollout"}], "answer_contains": ["5%"]}
+{"id": "l17", "question": "What does KR-3000 mean?", "kind": "lexical", "gold": [{"source": "error-codes.md", "section": "Safety errors"}], "answer_contains": ["emergency stop"]}
+{"id": "l18", "question": "What is the availability objective of the fleet controller?", "kind": "lexical", "gold": [{"source": "architecture.md", "section": "Fleet controller"}], "answer_contains": ["99.95%"]}
+{"id": "l19", "question": "When is a postmortem draft due?", "kind": "lexical", "gold": [{"source": "incident-response.md", "section": "Postmortems"}], "answer_contains": ["5 business days"]}
+{"id": "l20", "question": "How often does the communications lead post status updates during a SEV1?", "kind": "lexical", "gold": [{"source": "incident-response.md", "section": "Communication cadence"}], "answer_contains": ["30 minutes"]}
+{"id": "l21", "question": "What does make bootstrap install?", "kind": "lexical", "gold": [{"source": "onboarding.md", "section": "Development environment"}], "answer_contains": ["Rust"]}
+{"id": "l22", "question": "Within how many hours must an interview scorecard be submitted?", "kind": "lexical", "gold": [{"source": "interviewing.md", "section": "Scorecards"}], "answer_contains": ["24 hours"]}
+{"id": "l23", "question": "What is error KR-1017?", "kind": "lexical", "gold": [{"source": "error-codes.md", "section": "Navigation errors"}], "answer_contains": ["120 seconds"]}
+{"id": "p01", "question": "My robot complains it's carrying too much. What's the heaviest load it can take?", "kind": "paraphrase", "gold": [{"source": "error-codes.md", "section": "Payload errors"}], "answer_contains": ["600 kg"]}
+{"id": "p02", "question": "How long do I have to file a receipt after a business trip?", "kind": "paraphrase", "gold": [{"source": "expenses-and-travel.md", "section": "Submitting expenses"}], "answer_contains": ["30 days"]}
+{"id": "p03", "question": "I got woken up by a page at 3am. Do I still have to start work at the usual time?", "kind": "paraphrase", "gold": [{"source": "oncall.md", "section": "Compensation and time off"}], "answer_contains": ["morning off"]}
+{"id": "p04", "question": "Can I take an extended break after I've been here for many years?", "kind": "paraphrase", "gold": [{"source": "pto-and-leave.md", "section": "Sabbatical"}], "answer_contains": ["4-week"]}
+{"id": "p05", "question": "Who should I contact if my work computer gets stolen?", "kind": "paraphrase", "gold": [{"source": "security.md", "section": "Reporting a security issue"}], "answer_contains": ["security@kestrel.example"]}
+{"id": "p06", "question": "Am I allowed a nicer seat on a long flight?", "kind": "paraphrase", "gold": [{"source": "expenses-and-travel.md", "section": "Travel booking"}], "answer_contains": ["premium economy"]}
+{"id": "p07", "question": "What happens to vacation days I haven't used by the end of the year?", "kind": "paraphrase", "gold": [{"source": "pto-and-leave.md", "section": "Carryover"}], "answer_contains": ["December 31"]}
+{"id": "p08", "question": "How fast should I respond when a teammate asks me to look at their pull request?", "kind": "paraphrase", "gold": [{"source": "code-review.md", "section": "Response times"}], "answer_contains": ["one business day"]}
+{"id": "p09", "question": "Things broke right after we shipped. What should I try first?", "kind": "paraphrase", "gold": [{"source": "incident-response.md", "section": "Mitigation first"}, {"source": "deployment.md", "section": "Rolling back"}], "answer_contains": ["roll"]}
+{"id": "p10", "question": "Will the company pay for a desk and chair for working from home?", "kind": "paraphrase", "gold": [{"source": "expenses-and-travel.md", "section": "Home office"}], "answer_contains": ["$500"]}
+{"id": "p11", "question": "Once a customer asks us to erase their information, how long until it's gone?", "kind": "paraphrase", "gold": [{"source": "data-retention.md", "section": "Deletion requests"}], "answer_contains": ["30 days"]}
+{"id": "p12", "question": "Can I look at our code on my own personal laptop?", "kind": "paraphrase", "gold": [{"source": "security.md", "section": "Laptop and device security"}], "answer_contains": ["source code"]}
+{"id": "p13", "question": "Do I need a note from a doctor if I'm ill?", "kind": "paraphrase", "gold": [{"source": "pto-and-leave.md", "section": "Sick leave"}], "answer_contains": ["3"]}
+{"id": "p14", "question": "What level do fresh graduates usually start at after interning with us?", "kind": "paraphrase", "gold": [{"source": "performance-reviews.md", "section": "Engineering levels"}], "answer_contains": ["L2"]}
+{"id": "p15", "question": "Which programming language is the path-finding service written in?", "kind": "paraphrase", "gold": [{"source": "architecture.md", "section": "Route planner"}], "answer_contains": ["Rust"]}
+{"id": "p16", "question": "How long do we keep video recorded by the robots?", "kind": "paraphrase", "gold": [{"source": "data-retention.md", "section": "Camera footage"}], "answer_contains": ["30 days"]}
+{"id": "p17", "question": "Who gets alerted if the person on duty doesn't answer?", "kind": "paraphrase", "gold": [{"source": "oncall.md", "section": "Escalation"}], "answer_contains": ["secondary"]}
+{"id": "p18", "question": "How big should my code changes be when I send them for review?", "kind": "paraphrase", "gold": [{"source": "code-review.md", "section": "Pull request size"}], "answer_contains": ["400"]}
+{"id": "p19", "question": "I just pushed a password to git by mistake. What do I do?", "kind": "paraphrase", "gold": [{"source": "security.md", "section": "Secrets management"}], "answer_contains": ["rotate"]}
+{"id": "p20", "question": "How soon do job candidates hear back after their last round?", "kind": "paraphrase", "gold": [{"source": "interviewing.md", "section": "Candidate experience"}], "answer_contains": ["five business days"]}
+{"id": "u01", "question": "What is the company's 401(k) matching percentage?", "kind": "unanswerable", "gold": [], "answer_contains": []}
+{"id": "u02", "question": "How many robots does Kestrel have deployed in total?", "kind": "unanswerable", "gold": [], "answer_contains": []}
+{"id": "u03", "question": "Is there free lunch in the office?", "kind": "unanswerable", "gold": [], "answer_contains": []}
+{"id": "u04", "question": "Who is the CEO of Kestrel Robotics?", "kind": "unanswerable", "gold": [], "answer_contains": []}
+{"id": "u05", "question": "What is the Wi-Fi password at the Fremont test warehouse?", "kind": "unanswerable", "gold": [], "answer_contains": []}

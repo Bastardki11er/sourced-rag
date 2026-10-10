@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: pytest -q
+
+  retrieval-eval:
+    name: Retrieval quality gate
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      FASTEMBED_CACHE_PATH: /home/runner/.cache/fastembed
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/fastembed
+          key: fastembed-bge-small-en-v1.5-minilm-l6
+      - run: pip install -e .
+      - run: sourced ingest data/handbook
+      - name: Evaluate retrieval and fail if hit@5 drops below 0.95
+        shell: bash  # explicit bash enables pipefail, so the gate's exit code survives the tee
+        run: |
+          sourced eval eval/questions.jsonl --rerank --fail-under 0.95 | tee eval-report.md
+          { echo "## Retrieval eval"; echo; cat eval-report.md; } >> "$GITHUB_STEP_SUMMARY"
+
+  docker:
+    name: Docker image smoke test
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t sourced .
+      - run: docker run -d --name sourced -p 8000:8000 sourced
+      - name: Wait for the API and ask a question
+        run: |
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 2; done
+          curl -sf -X POST localhost:8000/ask -H 'Content-Type: application/json' \
+            -d '{"question": "How do I roll back a release?"}' | tee answer.json
+          grep -q "kctl rollback" answer.json
+      - if: failure()
+        run: docker logs sourced
