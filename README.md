@@ -1,6 +1,6 @@
 # Sourced
 
-[![CI](https://github.com/Bastardki11er/sourced-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Bastardki11er/sourced-rag/actions/workflows/ci.yml)
+[![CI](https://github.com/Lovio-Huang/sourced-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Lovio-Huang/sourced-rag/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)
 
 Ask questions about your documentation and get answers **with citations you can check**.
