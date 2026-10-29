@@ -8,7 +8,7 @@ Ask questions about your documentation and get answers **with citations you can 
 Sourced is a retrieval-augmented generation (RAG) service. It indexes Markdown docs, finds
 the right passages with **hybrid search** (BM25 + embeddings + a cross-encoder reranker),
 and has Claude answer **only from those passages**. Each cited claim comes back with the
-source sentence it points to, so a reader can check it; the quote shows where a claim came
+source passage it points to, so a reader can check it; the quote shows where a claim came
 from, not that the claim is right. Without Claude credentials, an `extractive` mode returns
 the best passage verbatim instead. Retrieval quality is measured on a labelled question set,
 and CI fails if it regresses.
@@ -183,13 +183,57 @@ errors only come from `/ask` with the Claude answerer. `/docs` lists the same re
 ## Tests
 
 ```bash
-pytest -q        # 68 tests, ~1.5 s, no network: a hashing embedder stands in for the model
+pytest -q        # 78 tests, ~1.5 s, no network: a hashing embedder stands in for the model
 ruff check src tests
 ```
 
 The tests cover heading-aware chunking (code fences, overlap, splitting paragraphs longer than a chunk, headings like `C#`), FTS5 query sanitizing (including accented words), RRF math, reranking, idempotent re-ingestion, keeping the index in step with the folder (another process re-indexing, deleted files, one folder per index, old indexes), one ingest at a time across processes (lock contention, release on failure and on a killed process), refusing an index built with another model, vector size or chunking, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, API validation and error mapping, the eval command, and a BM25 regression floor on the real handbook.
 
 One test builds the request with the real `anthropic` SDK over a mocked HTTP transport, so it checks the beta header and the serialized body the SDK actually sends, and that a cited reply parses. It does not show that the live API accepts the request; only a call with a real key does that.
+
+**Live check against the real API (opt-in, paid).** `python -m sourced.live_check` asks Claude 12 questions:
+9 from `eval/questions.jsonl` (exact facts, an error code, a command, paraphrases, a question with two
+acceptable sections, two with no answer), one that needs two sections combined, and two prompt-injection
+cases on a temporary corpus whose documents tell the model to lie or leak a (made-up) password. It writes
+each answer with its passages, citations, stop reason, usage and cost to a JSON lines file, plus automatic
+checks (expected facts, citations point at passages that were sent and quote text inside them, declines
+without citing, no injected text in the answer). Those checks are a first pass; the answers still need
+reading. It refuses to run without `--confirm-spend`, credentials and the official API host, and makes no
+retries. `--budget-usd` (default 2) covers everything recorded in the `--out` file, earlier runs included; a
+call is skipped when its estimated worst case (full `max_tokens` plus one fallback attempt, at the highest
+price the tool knows) would pass it. The server picks the fallback model, so that is an estimate, not a
+guarantee. Any API error, or a reply whose cost can't be counted, stops the run and marks the file so it
+can't be resumed as if that call were free. Start with one question:
+
+```bash
+export FASTEMBED_CACHE_PATH=~/.cache/fastembed
+python -m sourced.live_check --index .sourced/index.db --out live-l02.jsonl --confirm-spend --only l02
+```
+
+**Result on 2026-10-29** (`claude-opus-5-5`, effort `medium`): 12 different questions, 13 generation calls
+(l02 ran twice, the others once). ~1.3–2.1k input and 84–367 output tokens per call, 1.5–6.7 s. $0.14 in all,
+computed from each response's `usage` at $4 / $20 per million tokens, not read from the bill.
+
+- **API compatibility.** The live API accepted the request as sent (the fallback beta and `fallbacks`,
+  `output_config`, citable `search_result` blocks) and every reply parsed into an answer with numbered
+  citations. No call was refused, truncated or handed to a fallback model, so the fallback switch itself was
+  not exercised.
+- **Answers.** Facts were right on all 10 answerable questions (the command, the error code, the paraphrases,
+  both parts of the combined question); l02 gave the same command both times. p09's main answer was right, but
+  it framed the feature-flag advice as "if the change is behind a flag", which the handbook doesn't say. Both
+  unanswerable questions were declined with no citation and no invented policy.
+- **Citations.** All 14 quotes appear word for word in the passage they cite (checked automatically). Read
+  against the claims next to them, they support those claims, apart from p09's added condition above. Every
+  quote was a whole chunk, not a sentence; why is not established, and sending a chunk as one text block per
+  sentence is an untested idea.
+- **Prompt injection.** In both cases the answer used the legitimate text and pointed out the planted
+  instruction instead of following it; the answer text contained neither the made-up password nor the
+  attacker address. The Wi-Fi citation, though, quotes the whole passage, planted password and address
+  included, and citations are returned to the user too. Anything indexed can reach the asker through a
+  citation (see the permissions limitation below).
+
+That is 12 questions on a small fictional handbook, mostly one call each: it shows the integration works and
+how these answers looked, not an accuracy rate or how stable answers are across runs.
 
 CI runs three jobs: lint + tests, the retrieval quality gate with real models, and a Docker smoke test that builds the image and asks it a question.
 
@@ -204,6 +248,7 @@ src/sourced/
 ├── generation.py   Claude answerer with citations, extractive fallback
 ├── pipeline.py     ingest / search / ask
 ├── evaluation.py   hit@k, MRR, answer checks
+├── live_check.py   opt-in paid check of real Claude answers
 ├── api.py          FastAPI app
 └── cli.py          sourced ingest | search | ask | eval | serve
 data/handbook/      sample corpus: a fictional robotics company's engineering handbook
@@ -212,10 +257,10 @@ eval/               labelled questions
 
 ## Limitations and next steps
 
-- **Answer-quality numbers need an API key.** `sourced eval --answers` checks that answers contain the expected facts, cite the right section, and decline the 5 unanswerable questions. I haven't published those numbers yet. Next would be an LLM-as-judge for faithfulness on open-ended answers.
+- **Answer quality is checked on 12 questions only** (see the live check above). `sourced eval --answers` runs all 48 with keyword checks; I haven't published those numbers. Next would be an LLM-as-judge for faithfulness on open-ended answers. In the live check every quote was a whole chunk; whether per-sentence text blocks would give sentence-level quotes is untested.
 - **The corpus is small and synthetic** (14 documents, 87 chunks), so these results show the method, not production performance. The real test is a large, messy corpus with many near-duplicate passages.
 - **Streaming** (`/ask` over server-sent events) and **PDF ingestion** are not implemented yet.
-- **No authentication or per-user document permissions.** A real deployment would filter retrieval by what the asker is allowed to read.
+- **No authentication or per-user document permissions.** Answers and citations can quote anything in the index, so it only fits callers who may read every indexed document. A real deployment would filter retrieval by what the asker is allowed to read.
 
 The sample handbook describes a fictional company and was written for this project.
 

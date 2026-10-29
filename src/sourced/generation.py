@@ -1,9 +1,11 @@
 """Answer generation.
 
 Retrieved chunks are sent to Claude as ``search_result`` content blocks with
-citations enabled. Claude then returns the exact sentences it relied on for
-each claim, so every citation points at text that really exists in the
-retrieved chunk. Grounding is enforced by the API, not just asked for in the prompt.
+citations enabled. The API returns, for each cited claim, the text it cites,
+so every citation points at text that really exists in a retrieved chunk. Each
+chunk is sent as one text block; in the 2026-10-29 live check every quote was a
+whole chunk, not a sentence. A quote shows where text comes from, not that the
+claim next to it follows from it; the prompt asks Claude to stay within the passages.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ needed to act on it. If the search results do not contain the answer, say that y
 not find it in the handbook instead of guessing, and do not cite anything."""
 
 NOT_FOUND = "I couldn't find that in the handbook."
+MAX_TOKENS = 16000  # thinking counts toward it; the live check budgets each call against it
 
 
 @dataclass
@@ -72,7 +75,7 @@ class ClaudeAnswerer:
         ]
         response = self.client.beta.messages.create(
             model=self.model,
-            max_tokens=16000,
+            max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": [*search_results, {"type": "text", "text": question}]}],
             output_config={"effort": self.effort},
