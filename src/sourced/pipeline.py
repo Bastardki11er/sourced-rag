@@ -7,14 +7,20 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .chunking import chunk_markdown
+from .chunking import CHUNKER_VERSION, chunk_markdown
 from .config import Settings
 from .embeddings import Embedder
 from .generation import Answer, Answerer
 from .retrieval import Mode, Retriever, SearchResult
-from .store import Index
+from .store import REBUILD, Index, IndexBusyError, IndexConfigError
+
+__all__ = ["IndexBindingError", "IndexBusyError", "IndexConfigError", "Pipeline", "build_pipeline"]
 
 SUPPORTED_SUFFIXES = {".md", ".markdown", ".txt"}
+
+
+class IndexBindingError(ValueError):
+    """The path to ingest doesn't belong to this index's folder."""
 
 
 @dataclass
@@ -22,6 +28,7 @@ class IngestReport:
     added: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
     chunks: int = 0
 
 
@@ -47,14 +54,33 @@ class Pipeline:
         self.answerer = answerer
         self.retriever = retriever or Retriever(index, embedder)
 
-    def ingest(self, root: Path) -> IngestReport:
-        """Indexes every Markdown/text file under ``root``. Unchanged files are skipped by content hash."""
+    def ingest(self, path: Path) -> IngestReport:
+        """Indexes a folder of Markdown/text files, or one file in it. Unchanged files are skipped by hash.
+
+        An index holds one folder (see ``_folder``), and documents are named by their path
+        inside it, so ingesting one file updates the same document a folder ingest would.
+        A folder ingest also removes the documents whose files are gone, but only after
+        every file in the folder was read and indexed: a missing path, an unreadable file
+        or a failure part-way leaves them all in place. A single file never removes others.
+
+        The whole run holds the index's ingest lock, so a second ingest (any process) fails
+        with IndexBusyError instead of interleaving with this one. A failed run can leave
+        some documents written: only a run that returns completes the index.
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"{path} does not exist")
+        with self.index.ingest_lock():
+            return self._ingest(path, self._folder(path))
+
+    def _ingest(self, path: Path, folder: Path) -> IngestReport:
+        if path.is_file():
+            files = [path.resolve()]
+        else:
+            files = sorted(p for p in folder.rglob("*") if p.suffix in SUPPORTED_SUFFIXES and p.is_file())
         report = IngestReport()
-        files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.suffix in SUPPORTED_SUFFIXES)
-        base = root.parent if root.is_file() else root
-        for path in files:
-            source = path.relative_to(base).as_posix()
-            text = path.read_text(encoding="utf-8")
+        for file in files:
+            source = file.relative_to(folder).as_posix()
+            text = file.read_text(encoding="utf-8")
             sha = hashlib.sha256(text.encode()).hexdigest()
             previous = self.index.document_hash(source)
             if previous == sha:
@@ -64,8 +90,58 @@ class Pipeline:
             embeddings = self.embedder.embed_documents([c.indexed_text for c in chunks])
             self.index.replace_document(source, sha, chunks, embeddings)
             (report.added if previous is None else report.updated).append(source)
+        if path.is_dir():
+            seen = {*report.added, *report.updated, *report.unchanged}
+            report.removed = [source for source in self.index.sources() if source not in seen]
+            self.index.remove_documents(report.removed)
         report.chunks = self.index.chunk_count()
         return report
+
+    def _config(self) -> dict[str, str]:
+        """What the index's chunks and vectors depend on; ingest refuses an index built with anything else."""
+        return {
+            "embedding_model": self.embedder.model_id,
+            "dimensions": str(self.embedder.dimensions),
+            "max_chunk_chars": str(self.settings.max_chunk_chars),
+            "chunker_version": CHUNKER_VERSION,
+        }
+
+    def _folder(self, path: Path) -> Path:
+        """The folder this index belongs to; on a new index, creates it with this folder and configuration.
+
+        Raises before anything is written. Without a binding, two folders that both have a
+        README.md would overwrite each other's document, and removing "files that are gone"
+        would delete the other folder's documents. Paths are compared after resolving them
+        (absolute, no ``..``, symlinks followed), so a moved folder needs a new index.
+        Runs under the ingest lock, so two first ingests can't both see an empty index.
+        """
+        wanted = (path if path.is_dir() else path.parent).resolve()
+        meta = self.index.meta()
+        if "root" not in meta:
+            if self.index.sources():
+                # Built by a version that didn't record its folder and model: refuse rather than
+                # guess which documents belong where (and remove the wrong ones).
+                raise IndexBindingError(
+                    f"{self.settings.index_path} was built by an older version of sourced that didn't record which "
+                    f"folder and embedding model it uses, so it can't be updated. Keyword search still works. {REBUILD}"
+                )
+            self.index.initialize(wanted, self._config())
+            return wanted
+        changed = [
+            f"{key} {meta.get(key)} -> {value}" for key, value in self._config().items() if meta.get(key) != value
+        ]
+        if changed:
+            raise IndexConfigError(
+                f"{self.settings.index_path} was built with a different configuration ({'; '.join(changed)}). {REBUILD}"
+            )
+        bound = Path(meta["root"])
+        inside = wanted.is_relative_to(bound) if path.is_file() else wanted == bound
+        if not inside:
+            raise IndexBindingError(
+                f"{self.settings.index_path} holds the documents of {bound}. To index {wanted}, "
+                f"use a separate index: SOURCED_INDEX=<another file> sourced ingest {path}"
+            )
+        return bound
 
     def search(
         self, query: str, top_k: int | None = None, mode: Mode = "hybrid", rerank: bool = False

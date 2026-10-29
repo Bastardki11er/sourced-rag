@@ -70,11 +70,21 @@ def main(argv: list[str] | None = None) -> int:
         wants_rerank = settings.rerank if wants_rerank is None else wants_rerank
     pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
 
+    from .pipeline import IndexBindingError, IndexBusyError, IndexConfigError
+
+    try:
+        return _run(args, settings, pipeline)
+    except (IndexBindingError, IndexBusyError, IndexConfigError, FileNotFoundError) as error:
+        print(f"sourced: error: {error}", file=sys.stderr)
+        return 2
+
+
+def _run(args: argparse.Namespace, settings: Settings, pipeline) -> int:
     if args.command == "ingest":
         report = pipeline.ingest(args.path)
         print(
-            f"added {len(report.added)}, updated {len(report.updated)}, unchanged {len(report.unchanged)}"
-            f" -> {report.chunks} chunks in {settings.index_path}"
+            f"added {len(report.added)}, updated {len(report.updated)}, unchanged {len(report.unchanged)}, "
+            f"removed {len(report.removed)} -> {report.chunks} chunks in {settings.index_path}"
         )
 
     elif args.command == "search":
@@ -96,15 +106,16 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     elif args.command == "eval":
-        from .evaluation import answer_report, load_questions, retrieval_report, score_retrieval
+        from .evaluation import answer_report, load_questions, retrieval_report
 
         questions = load_questions(args.questions)
-        print(retrieval_report(pipeline, questions, with_rerank=args.rerank))
+        report, scores = retrieval_report(pipeline, questions, with_rerank=args.rerank)
+        print(report)
         if args.answers:
             print()
             print(answer_report(pipeline, questions))
         if args.fail_under is not None:
-            hit5 = score_retrieval(pipeline, [q for q in questions if q.answerable], "hybrid", args.rerank).hits[5]
+            hit5 = scores["hybrid", args.rerank].hits[5]  # the row the table shows, not a second run
             if hit5 < args.fail_under:
                 print(f"\nFAIL: hit@5 {hit5:.2f} is below the required {args.fail_under:.2f}")
                 return 1

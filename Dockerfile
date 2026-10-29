@@ -8,9 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 RUN useradd --system --uid 1001 app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 COPY src src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --no-deps . && pip check
 
 # Bake the models and the sample index into the image so the container starts
 # answering immediately, with no network access needed at runtime.
