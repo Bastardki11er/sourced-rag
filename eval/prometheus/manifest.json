@@ -1,0 +1,178 @@
+{
+  "repository": "https://github.com/prometheus/prometheus",
+  "tag": "v2.53.0",
+  "commit": "4c35b9250afefede41c5f5acd76191f90f625898",
+  "files": [
+    {
+      "path": "docs/command-line/prometheus.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/command-line/prometheus.md",
+      "source_sha256": "801bfd9d09c16aabfcac35b6b17f0ca03c0c447cae1cf75411f43b568de044e1",
+      "converted": "corpus/command-line/prometheus.md",
+      "converted_sha256": "5930fb84a47ef98fa9465052137345bdfff4b372e493401c52dfc5a6617d76ee"
+    },
+    {
+      "path": "docs/command-line/promtool.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/command-line/promtool.md",
+      "source_sha256": "13ed6ee6ce767637f17aaca134f921b4da7dbc84c9f8f447eb55ef234c0a40c3",
+      "converted": "corpus/command-line/promtool.md",
+      "converted_sha256": "0ba0f9f294f44491f4d27ffda2c432074d7ffc0b1924154c5f75e1f5ea3fe4f0"
+    },
+    {
+      "path": "docs/configuration/alerting_rules.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/alerting_rules.md",
+      "source_sha256": "dcad0c1b4e1a56c89ddd1cbc835162b6e8263e39441c1ecb9a4237784683dda0",
+      "converted": "corpus/configuration/alerting_rules.md",
+      "converted_sha256": "0b33aa37e459cde22f1af78e31dd8072575aeea40b0680717d63184b85c2dfb7"
+    },
+    {
+      "path": "docs/configuration/https.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/https.md",
+      "source_sha256": "58ec2f2a7af1c56ba364bd49bd1f4a1ee1d9ecc4479e65efdcf940480f3e26ff",
+      "converted": "corpus/configuration/https.md",
+      "converted_sha256": "e305c27e662000710b2fd302c23b7e74a8a1b1d1e1825bbe30fec1a6f4c756c1"
+    },
+    {
+      "path": "docs/configuration/recording_rules.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/recording_rules.md",
+      "source_sha256": "eb675914b8c4a1ba46af660e4e36c2d7d7f63384b79ce5b3d56183c5377eb0d5",
+      "converted": "corpus/configuration/recording_rules.md",
+      "converted_sha256": "04c782f3b0ed80187b7895536129e267fc5cfc397d4fb50f29be67e95f036046"
+    },
+    {
+      "path": "docs/configuration/template_examples.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/template_examples.md",
+      "source_sha256": "9dff2f45e90ddd93d3d1a8fbccfb05cf9ce1f997fc881448f83c4ebc1a954665",
+      "converted": "corpus/configuration/template_examples.md",
+      "converted_sha256": "848621b479acfb07d98b21d5dfa3ef566b8a9547847fa6ba3ad7aa83c28183a5"
+    },
+    {
+      "path": "docs/configuration/template_reference.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/template_reference.md",
+      "source_sha256": "960eb5940d9668366cc28870ccbad249a1960ff83debd40dc6e630679e83bd3a",
+      "converted": "corpus/configuration/template_reference.md",
+      "converted_sha256": "ad505c1090aa96edb67b9c735665eec3b336141018e67bf916e4754f3abb9e3e"
+    },
+    {
+      "path": "docs/configuration/unit_testing_rules.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/configuration/unit_testing_rules.md",
+      "source_sha256": "7385026c9ee3881178f5846042d3631ed38b053d778e9f68e6eb36a1043a66e4",
+      "converted": "corpus/configuration/unit_testing_rules.md",
+      "converted_sha256": "1930d28e8cd019d1e1a532a765242cfe43b9a7c9551cf722d503f54dc13be149"
+    },
+    {
+      "path": "docs/feature_flags.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/feature_flags.md",
+      "source_sha256": "1a69d7509478b89bc149aa16b6d1371b009e79516a6165d67a713857d02023a8",
+      "converted": "corpus/feature_flags.md",
+      "converted_sha256": "4fcdd94dc42a395a580ce318f16b09aa9c5cd65a2950b982e26b2ce72718ccb0"
+    },
+    {
+      "path": "docs/federation.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/federation.md",
+      "source_sha256": "4ac037dc7a659167405750f58675e59924cff4d66dce3c3387820cbe04cc0aa0",
+      "converted": "corpus/federation.md",
+      "converted_sha256": "1aae39b5f85a09984ef7c7341e52993005141edfdb71a1fe8a402bd66155ac02"
+    },
+    {
+      "path": "docs/getting_started.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/getting_started.md",
+      "source_sha256": "78276129ed2781f75f3420f6fc4916d94d5de3fc487285cd0461af425bb7a4b9",
+      "converted": "corpus/getting_started.md",
+      "converted_sha256": "86ff8e9a4f3115d1a9cd659be563f7ab18d047bd5e2baf77368faa944cae484e"
+    },
+    {
+      "path": "docs/http_sd.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/http_sd.md",
+      "source_sha256": "3f85bbba573b3362c422dc0d8abcca00729f4ccb29b4a85b8846e44509ca725a",
+      "converted": "corpus/http_sd.md",
+      "converted_sha256": "52faf901da7d6e597ffaffa995108bac228f912aa23c6e768c7fc64affafb971"
+    },
+    {
+      "path": "docs/installation.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/installation.md",
+      "source_sha256": "bc96cc28f7c7c7fed81ddafc88256e804fe740ce4667f5e6eea9f8241c7ac552",
+      "converted": "corpus/installation.md",
+      "converted_sha256": "4e08b52ee755a5cf007683cc2ae0b66e444f0b29929ef9a262ec0bf793fa1fb2"
+    },
+    {
+      "path": "docs/management_api.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/management_api.md",
+      "source_sha256": "dbd77e152fde52e9c1bf613b26c97a85602b4a547d267dfea85bb7618beeeb87",
+      "converted": "corpus/management_api.md",
+      "converted_sha256": "3a84aa436baf55440f2714d5fb5ab580394787c99cac432c2d143c5d847d55e9"
+    },
+    {
+      "path": "docs/migration.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/migration.md",
+      "source_sha256": "6e3801c56f1df8dc96c7ed287c987a46722be54ef9f5ad3c4a15a89f76c8385c",
+      "converted": "corpus/migration.md",
+      "converted_sha256": "ae6e96831f50ffbde56e05cd746b94928747663c5df87d5c352972e37e567289"
+    },
+    {
+      "path": "docs/querying/api.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/api.md",
+      "source_sha256": "165ffd59e941d2c164133df774d11d77fe92662fc238e447d55e29903d5cb6b2",
+      "converted": "corpus/querying/api.md",
+      "converted_sha256": "0cc09c5fb983fb318d3d6d2b12238f8adee9fca2b291e2c9fde5a4eafb7d436e"
+    },
+    {
+      "path": "docs/querying/basics.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/basics.md",
+      "source_sha256": "ca7320e152d61d0d2621a952a2d5d709b1188a6a6b558b7843bb6689daf50c43",
+      "converted": "corpus/querying/basics.md",
+      "converted_sha256": "c9c6301907f5852b1db3554496cc7b22ea146a906737e298e773ad971d70b4cc"
+    },
+    {
+      "path": "docs/querying/examples.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/examples.md",
+      "source_sha256": "a885ea5d874f58ab1746b7e2465c7ccc496c802f3b8e2860383662af1eb502a7",
+      "converted": "corpus/querying/examples.md",
+      "converted_sha256": "4f0d6bcd263cac214a7a47be1649dd2e5afb1795ae5b2d86d0de657ce60780e3"
+    },
+    {
+      "path": "docs/querying/functions.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/functions.md",
+      "source_sha256": "bcb8605ce563987b65d549358c26d4693c6e91efe0f0d6c72ecc8d436e65a50f",
+      "converted": "corpus/querying/functions.md",
+      "converted_sha256": "3e05a8281a9e7b23682922c44a920274788317d01670e121ca5a66cfdcb32fa2"
+    },
+    {
+      "path": "docs/querying/operators.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/operators.md",
+      "source_sha256": "9eeab203b955a18b896eb2a9bda15f92b0c5f54370c990bebf666600ad33868a",
+      "converted": "corpus/querying/operators.md",
+      "converted_sha256": "8c2e5ac93414be75fdc5e2b393a2e7cee7970a0d86d23f1aa0f50ff105acba93"
+    },
+    {
+      "path": "docs/querying/remote_read_api.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/querying/remote_read_api.md",
+      "source_sha256": "7090c2670852baf357eb80d443fe4c7dc525deb083a38e289e1c13048a7c1937",
+      "converted": "corpus/querying/remote_read_api.md",
+      "converted_sha256": "cf1335433eac9d990ae33d741c3036c25d62b66c5d9e31d5549a252c037d8d1c"
+    },
+    {
+      "path": "docs/stability.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/stability.md",
+      "source_sha256": "e7c4a78cc5a489b3170d3d0759729e3a7abd2e890bec8ad8dac44cd6ad0359d2",
+      "converted": "corpus/stability.md",
+      "converted_sha256": "4f7467b7bbb32b635a7fa47cfec028ff0ec2b309ecd03ccdfab77135bf658f54"
+    },
+    {
+      "path": "docs/storage.md",
+      "source_url": "https://raw.githubusercontent.com/prometheus/prometheus/4c35b9250afefede41c5f5acd76191f90f625898/docs/storage.md",
+      "source_sha256": "70d4ecf1808b3eb146b727bece6373f5a734596cc855b783a2729d20e9f5de16",
+      "converted": "corpus/storage.md",
+      "converted_sha256": "98684d0f39b170ea37573b760b82746a0b013645f7022c7cdeebeff36ac38398"
+    }
+  ],
+  "legal": [
+    {
+      "path": "LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "NOTICE",
+      "sha256": "4d69c19300dc95e26630247f7d76d525b738f87c5af79f39b61ca0831c23ca34"
+    }
+  ]
+}
