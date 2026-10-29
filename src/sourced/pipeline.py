@@ -14,13 +14,24 @@ from .generation import Answer, Answerer
 from .retrieval import Mode, Retriever, SearchResult
 from .store import REBUILD, Index, IndexBusyError, IndexConfigError
 
-__all__ = ["IndexBindingError", "IndexBusyError", "IndexConfigError", "Pipeline", "build_pipeline"]
+__all__ = [
+    "DocumentLinkError",
+    "IndexBindingError",
+    "IndexBusyError",
+    "IndexConfigError",
+    "Pipeline",
+    "build_pipeline",
+]
 
 SUPPORTED_SUFFIXES = {".md", ".markdown", ".txt"}
 
 
 class IndexBindingError(ValueError):
     """The path to ingest doesn't belong to this index's folder."""
+
+
+class DocumentLinkError(ValueError):
+    """The documents to ingest include a symbolic link, which ingest doesn't follow."""
 
 
 @dataclass
@@ -66,10 +77,17 @@ class Pipeline:
         The whole run holds the index's ingest lock, so a second ingest (any process) fails
         with IndexBusyError instead of interleaving with this one. A failed run can leave
         some documents written: only a run that returns completes the index.
+
+        Symbolic links inside the folder (files, directories, broken ones), or a single file
+        that is a link, stop the run with DocumentLinkError before the index is touched, so
+        a link can't pull in text from outside the folder. The folder itself may be reached
+        through a link. Checked once up front: not a guard against files swapped mid-run.
         """
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
         with self.index.ingest_lock():
+            root = self.index.meta().get("root")
+            _refuse_links(path, Path(root) if root else path.parent.resolve())
             return self._ingest(path, self._folder(path))
 
     def _ingest(self, path: Path, folder: Path) -> IngestReport:
@@ -161,6 +179,29 @@ class Pipeline:
                 "retrieval": round((retrieved - started) * 1000, 1),
                 "generation": round((finished - retrieved) * 1000, 1),
             },
+        )
+
+
+def _refuse_links(path: Path, root: Path) -> None:
+    """Raises DocumentLinkError for a link between ``root`` (the folder, however it was reached) and the documents."""
+    if path.is_dir():
+        links = sorted(p for p in path.resolve().rglob("*") if p.is_symlink())
+    elif path.is_symlink():
+        links = [path]
+    else:
+        # A single file: also every directory between it and the folder ("docs/shortcut/a.md").
+        # A file outside the folder is left to the folder check, whatever links lie above it.
+        links, between = [], []
+        for parent in path.absolute().parents:  # absolute() keeps the links that resolve() would follow
+            if parent.resolve() == root:
+                links = [p for p in between if p.is_symlink()][-1:]
+                break
+            between.append(parent)
+    if links:
+        more = f" (and {len(links) - 1} more)" if len(links) > 1 else ""
+        raise DocumentLinkError(
+            f"{links[0]} is a symbolic link{more}. sourced doesn't follow links in the document folder; "
+            "copy the file in or remove the link, then ingest again. Nothing was changed."
         )
 
 
