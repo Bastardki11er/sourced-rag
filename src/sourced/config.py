@@ -22,6 +22,14 @@ class Settings:
     max_chunk_chars: int = 1200
     top_k: int = 5
 
+    def __post_init__(self) -> None:
+        if self.answerer not in {"claude", "extractive"}:
+            raise ValueError("SOURCED_ANSWERER must be 'claude' or 'extractive'")
+        if self.max_chunk_chars < 1:
+            raise ValueError("SOURCED_MAX_CHUNK_CHARS must be positive")
+        if not 1 <= self.top_k <= 20:
+            raise ValueError("SOURCED_TOP_K must be between 1 and 20")
+
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ

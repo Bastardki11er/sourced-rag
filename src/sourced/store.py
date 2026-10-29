@@ -18,6 +18,10 @@ import numpy as np
 from .chunking import Chunk
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS documents (
     source TEXT PRIMARY KEY,
     sha256 TEXT NOT NULL
@@ -77,9 +81,35 @@ class Index:
 
     # --- writes ---------------------------------------------------------------
 
+    def bind(self, key: str, value: str) -> None:
+        """Keep one corpus and one embedding space per index, including across restarts."""
+        with self._lock, self._db:
+            row = self._db.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
+            if row is not None and row[0] != value:
+                raise ValueError(f"Index {key} differs from this configuration; use a new SOURCED_INDEX path")
+            if row is None:
+                if key == "embedding_model" and self._db.execute("SELECT 1 FROM documents LIMIT 1").fetchone():
+                    raise ValueError("Legacy index has no embedding metadata; re-ingest into a new SOURCED_INDEX path")
+                self._db.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES (?, ?)", (key, value))
+                # Another connection may have bound the index after our first read.
+                row = self._db.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
+                if row[0] != value:
+                    raise ValueError(f"Index {key} differs from this configuration; use a new SOURCED_INDEX path")
+
     def replace_document(self, source: str, sha256: str, chunks: list[Chunk], embeddings: np.ndarray) -> None:
         """Atomically swaps all chunks of one document, so re-ingesting is idempotent."""
         with self._lock, self._db:
+            embeddings = np.asarray(embeddings, dtype=np.float32)
+            if embeddings.ndim != 2 or len(embeddings) != len(chunks):
+                raise ValueError("Expected one embedding vector per chunk")
+            if chunks:
+                if embeddings.shape[1] == 0 or not np.isfinite(embeddings).all():
+                    raise ValueError("Embedding vectors must be non-empty and finite")
+                row = self._db.execute("SELECT length(embedding) / 4 FROM chunks LIMIT 1").fetchone()
+                if row and row[0] != embeddings.shape[1]:
+                    raise ValueError("Embedding dimension differs from the existing index")
+            if any(c.source != source for c in chunks):
+                raise ValueError("Chunk sources must match the document source")
             self._delete(source)
             self._db.execute("INSERT INTO documents (source, sha256) VALUES (?, ?)", (source, sha256))
             self._db.executemany(

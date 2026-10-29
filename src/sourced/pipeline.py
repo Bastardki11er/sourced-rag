@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from .chunking import chunk_markdown
 from .config import Settings
 from .embeddings import Embedder
@@ -46,22 +48,41 @@ class Pipeline:
         self.embedder = embedder
         self.answerer = answerer
         self.retriever = retriever or Retriever(index, embedder)
+        self.index.bind("embedding_model", settings.embedding_model)
 
     def ingest(self, root: Path) -> IngestReport:
         """Indexes every Markdown/text file under ``root``. Unchanged files are skipped by content hash."""
         report = IngestReport()
-        files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.suffix in SUPPORTED_SUFFIXES)
+        root = root.resolve(strict=True)
+        if root.is_file() and root.suffix.lower() not in SUPPORTED_SUFFIXES:
+            raise ValueError(f"Unsupported document type: {root.suffix}")
+        if not root.is_file() and not root.is_dir():
+            raise ValueError(f"Not a document or directory: {root}")
+        files = (
+            [root]
+            if root.is_file()
+            else sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES)
+        )
         base = root.parent if root.is_file() else root
+        self.index.bind("corpus_root", str(base))
         for path in files:
+            if not path.resolve().is_relative_to(base):
+                raise ValueError(f"Document symlink leaves the corpus directory: {path}")
             source = path.relative_to(base).as_posix()
             text = path.read_text(encoding="utf-8")
-            sha = hashlib.sha256(text.encode()).hexdigest()
+            # Include processing settings so an unchanged file is re-chunked when
+            # the chunker or its limits change. Embedding identity is index-wide.
+            sha = hashlib.sha256(f"chunker-v2\0{self.settings.max_chunk_chars}\0{text}".encode()).hexdigest()
             previous = self.index.document_hash(source)
             if previous == sha:
                 report.unchanged.append(source)
                 continue
             chunks = chunk_markdown(source, text, self.settings.max_chunk_chars)
-            embeddings = self.embedder.embed_documents([c.indexed_text for c in chunks])
+            embeddings = (
+                self.embedder.embed_documents([c.indexed_text for c in chunks])
+                if chunks
+                else np.empty((0, 0), dtype=np.float32)
+            )
             self.index.replace_document(source, sha, chunks, embeddings)
             (report.added if previous is None else report.updated).append(source)
         report.chunks = self.index.chunk_count()
@@ -70,7 +91,7 @@ class Pipeline:
     def search(
         self, query: str, top_k: int | None = None, mode: Mode = "hybrid", rerank: bool = False
     ) -> list[SearchResult]:
-        return self.retriever.search(query, top_k or self.settings.top_k, mode, rerank)
+        return self.retriever.search(query, self.settings.top_k if top_k is None else top_k, mode, rerank)
 
     def ask(self, question: str, top_k: int | None = None, rerank: bool | None = None) -> AskResult:
         started = time.perf_counter()
@@ -97,12 +118,17 @@ def build_pipeline(settings: Settings, with_reranker: bool | None = None) -> Pip
     from .retrieval import CrossEncoderReranker
 
     index = Index(settings.index_path)
-    embedder = FastEmbedEmbedder(settings.embedding_model)
-    use_reranker = settings.rerank if with_reranker is None else with_reranker
-    reranker = CrossEncoderReranker(settings.rerank_model) if use_reranker else None
-    answerer: Answerer = (
-        ClaudeAnswerer(anthropic.Anthropic(), settings.claude_model, settings.claude_effort)
-        if settings.answerer == "claude"
-        else ExtractiveAnswerer()
-    )
-    return Pipeline(settings, index, embedder, answerer, Retriever(index, embedder, reranker))
+    try:
+        index.bind("embedding_model", settings.embedding_model)
+        embedder = FastEmbedEmbedder(settings.embedding_model)
+        use_reranker = settings.rerank if with_reranker is None else with_reranker
+        reranker = CrossEncoderReranker(settings.rerank_model) if use_reranker else None
+        answerer: Answerer = (
+            ClaudeAnswerer(anthropic.Anthropic(), settings.claude_model, settings.claude_effort)
+            if settings.answerer == "claude"
+            else ExtractiveAnswerer()
+        )
+        return Pipeline(settings, index, embedder, answerer, Retriever(index, embedder, reranker))
+    except BaseException:
+        index.close()
+        raise

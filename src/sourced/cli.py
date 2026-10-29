@@ -54,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
 
     args = parser.parse_args(argv)
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.command == "serve":
         import uvicorn
@@ -68,7 +71,19 @@ def main(argv: list[str] | None = None) -> int:
     wants_rerank = getattr(args, "rerank", None)
     if args.command == "ask":
         wants_rerank = settings.rerank if wants_rerank is None else wants_rerank
-    pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
+    try:
+        pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    try:
+        return _run_command(args, settings, pipeline)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    finally:
+        pipeline.index.close()
+
+
+def _run_command(args, settings, pipeline) -> int:
 
     if args.command == "ingest":
         report = pipeline.ingest(args.path)

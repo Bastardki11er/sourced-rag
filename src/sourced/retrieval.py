@@ -66,11 +66,18 @@ class Retriever:
         self.candidates = candidates
 
     def search(self, query: str, top_k: int = 5, mode: Mode = "hybrid", rerank: bool = False) -> list[SearchResult]:
+        query = query.strip()
+        if not query:
+            raise ValueError("Query must not be blank")
+        if not 1 <= top_k <= 20:
+            raise ValueError("top_k must be between 1 and 20")
+        if mode not in {"bm25", "dense", "hybrid"}:
+            raise ValueError(f"Unsupported retrieval mode: {mode}")
         rankings: dict[str, list[str]] = {}
         if mode in ("bm25", "hybrid"):
-            rankings["bm25"] = self.index.bm25(query, self.candidates)
+            rankings["bm25"] = self.index.bm25(query, max(self.candidates, top_k))
         if mode in ("dense", "hybrid"):
-            rankings["dense"] = self.index.dense(self.embedder.embed_query(query), self.candidates)
+            rankings["dense"] = self.index.dense(self.embedder.embed_query(query), max(self.candidates, top_k))
 
         fused = reciprocal_rank_fusion(rankings)
         if rerank and self.reranker is not None:

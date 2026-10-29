@@ -1,3 +1,5 @@
+import pytest
+
 from sourced.chunking import chunk_markdown
 
 DOC = """\
@@ -65,3 +67,20 @@ def test_long_sections_split_on_paragraphs_with_overlap():
 def test_chunk_ids_are_stable_across_runs():
     first, second = chunk_markdown("deploy.md", DOC), chunk_markdown("deploy.md", DOC)
     assert [c.id for c in first] == [c.id for c in second]
+
+
+@pytest.mark.parametrize("body", ["word " * 200, "x" * 1000])
+def test_single_long_paragraph_respects_budget(body):
+    chunks = chunk_markdown("long.md", "# Long\n" + body, max_chars=100)
+    assert len(chunks) > 1
+    assert all(0 < len(c.text) <= 100 for c in chunks)
+    assert "".join("".join(c.text.split()) for c in chunks) == "".join(body.split())
+
+
+def test_mixed_fences_do_not_end_code_block():
+    doc = "# Real\n````markdown\n~~~\n# Still code\n```\n# Also code\n````\n## After\nBody"
+    chunks = chunk_markdown("fences.md", doc)
+    assert len(chunks) == 2
+    assert "# Still code" in chunks[0].text
+    assert "# Also code" in chunks[0].text
+    assert chunks[1].section == "After"

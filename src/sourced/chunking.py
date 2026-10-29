@@ -14,7 +14,19 @@ import re
 from dataclasses import dataclass
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _next_fence(line: str, fence: str | None) -> str | None:
+    match = _FENCE.match(line)
+    if match is None:
+        return fence
+    marker, tail = match.groups()
+    if fence is None:
+        return marker
+    if marker[0] == fence[0] and len(marker) >= len(fence) and not tail.strip():
+        return None
+    return fence
 
 
 @dataclass(frozen=True)
@@ -38,11 +50,13 @@ class Chunk:
 
 
 def chunk_markdown(source: str, markdown: str, max_chars: int = 1200) -> list[Chunk]:
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
     title = source
     headings: list[tuple[int, str]] = []
     sections: list[tuple[str, list[str]]] = []
     current: list[str] = []
-    in_fence = False
+    fence: str | None = None
 
     def flush() -> None:
         path = " > ".join(text for level, text in headings if level > 1)
@@ -51,9 +65,9 @@ def chunk_markdown(source: str, markdown: str, max_chars: int = 1200) -> list[Ch
         current.clear()
 
     for line in markdown.splitlines():
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        match = None if in_fence else _HEADING.match(line)
+        previous_fence = fence
+        fence = _next_fence(line, fence)
+        match = None if previous_fence or fence else _HEADING.match(line)
         if match:
             flush()
             level, text = len(match.group(1)), match.group(2)
@@ -77,11 +91,10 @@ def _paragraphs(lines: list[str]) -> list[str]:
     """Groups lines into paragraphs, keeping fenced code blocks and lists intact."""
     paragraphs: list[str] = []
     buffer: list[str] = []
-    in_fence = False
+    fence: str | None = None
     for line in lines:
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        if not line.strip() and not in_fence:
+        fence = _next_fence(line, fence)
+        if not line.strip() and not fence:
             if buffer:
                 paragraphs.append("\n".join(buffer).strip())
                 buffer = []
@@ -100,11 +113,22 @@ def _split_long(paragraphs: list[str], max_chars: int) -> list[str]:
     """
     chunks: list[str] = []
     current: list[str] = []
+    bounded: list[str] = []
     for paragraph in paragraphs:
+        # A single paragraph (or code block) can itself exceed the model budget.
+        # Prefer a whitespace boundary, but also handle long unbroken tokens.
+        while len(paragraph) > max_chars:
+            boundary = max(paragraph.rfind(" ", 0, max_chars + 1), paragraph.rfind("\n", 0, max_chars + 1))
+            end = boundary if boundary > 0 else max_chars
+            bounded.append(paragraph[:end])
+            paragraph = paragraph[end:].lstrip()
+        if paragraph:
+            bounded.append(paragraph)
+    for paragraph in bounded:
         candidate = "\n\n".join([*current, paragraph])
         if current and len(candidate) > max_chars:
             chunks.append("\n\n".join(current))
-            current = [current[-1], paragraph] if len(current[-1]) + len(paragraph) < max_chars else [paragraph]
+            current = [current[-1], paragraph] if len(current[-1]) + len(paragraph) + 2 <= max_chars else [paragraph]
         else:
             current.append(paragraph)
     if current:

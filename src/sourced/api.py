@@ -11,7 +11,7 @@ from typing import Literal
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .config import Settings
 from .pipeline import Pipeline, build_pipeline
@@ -19,6 +19,8 @@ from .retrieval import SearchResult
 
 
 class SearchRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     query: str = Field(min_length=1, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=20)
     mode: Literal["bm25", "dense", "hybrid"] = "hybrid"
@@ -26,6 +28,8 @@ class SearchRequest(BaseModel):
 
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     question: str = Field(min_length=1, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=20)
     rerank: bool | None = None  # None: use the server default (SOURCED_RERANK)
@@ -69,9 +73,11 @@ def create_app(pipeline: Pipeline | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.pipeline = pipeline or build_pipeline(Settings.from_env())
-        yield
-        if pipeline is None:  # an injected pipeline belongs to whoever created it
-            app.state.pipeline.index.close()
+        try:
+            yield
+        finally:
+            if pipeline is None:  # an injected pipeline belongs to whoever created it
+                app.state.pipeline.index.close()
 
     app = FastAPI(title="Sourced", summary="Answers from your docs, with citations.", lifespan=lifespan)
 

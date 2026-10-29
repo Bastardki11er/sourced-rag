@@ -120,15 +120,56 @@ docker build -t sourced . && docker run -p 8000:8000 -e ANTHROPIC_API_KEY source
 | `SOURCED_RERANK` | `true` |
 | `SOURCED_INDEX` | `.sourced/index.db` |
 | `SOURCED_ANSWERER` | `claude` if `ANTHROPIC_API_KEY` is set, otherwise `extractive` |
+| `SOURCED_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` |
+| `SOURCED_RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` |
+| `SOURCED_MAX_CHUNK_CHARS` | `1200` (positive integer) |
+| `SOURCED_TOP_K` | `5` (1–20) |
+
+### Index consistency
+
+Each index is bound to one resolved corpus directory and one embedding model. Repeated
+imports from that directory update existing documents without duplicating chunks; importing
+a same-named document from a different directory fails with an actionable error instead
+of overwriting the original. Use a separate `SOURCED_INDEX` for each corpus or embedding model.
+When importing a single file, its parent directory is the corpus directory.
+
+The ingestion fingerprint includes the chunking version and `SOURCED_MAX_CHUNK_CHARS`, so
+changing the chunk budget reprocesses unchanged documents. Individual chunks are bounded
+even when the original has a long paragraph or unbroken token. Oversized code blocks may
+span several chunks; blocks that fit are kept intact. Missing paths and unsupported single
+files fail explicitly. `.md`, `.markdown` and `.txt` extensions are case insensitive, and
+document symlinks that leave the corpus directory are rejected.
+
+Document replacement is transactional across text, FTS entries and vectors. Invalid vector
+counts, dimensions and non-finite values are rejected without losing the previous document.
+Ingestion is incremental per document, rather than one transaction for the entire directory;
+if a later document fails, earlier successful updates remain and the command can be retried.
+Deleting a file from disk does not automatically delete its indexed document.
+
+**Upgrading an older index:** indexes created before embedding metadata was added must be
+rebuilt at a new path. Keep the old file until the new index has been verified:
+
+```bash
+export SOURCED_INDEX=.sourced/index-v2.db
+sourced ingest data/handbook
+sourced serve
+```
+
+API inputs are trimmed before validation, so whitespace-only questions return HTTP 422.
+The Python search interface also validates query text, retrieval mode and `top_k`.
 
 ## Tests
 
 ```bash
-pytest -q        # 24 tests, ~0.2 s, no network: a hashing embedder stands in for the model
+pytest -q        # no network: a hashing embedder stands in for the model
 ruff check src tests
 ```
 
 The tests cover heading-aware chunking (including code fences and overlap), FTS5 query sanitizing, RRF math, reranking, idempotent re-ingestion, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, API validation and error mapping, and a BM25 regression floor on the real handbook.
+
+Additional regression cases cover configuration-driven reindexing, corpus/model binding across
+restarts, vector validation, transaction rollback, stale FTS/vector removal after updates,
+empty documents, symlinks, long paragraphs, mixed code fences and CLI error cleanup.
 
 CI runs three jobs: lint + tests, the retrieval quality gate with real models, and a Docker smoke test that builds the image and asks it a question.
 
