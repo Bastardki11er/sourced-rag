@@ -62,3 +62,24 @@ def test_ingest_exits_non_zero_while_another_ingest_runs(make_pipeline, monkeypa
         assert "another sourced ingest" in capsys.readouterr().err
     finally:
         child.communicate("go\n", timeout=60)
+
+
+def test_a_blank_search_query_exits_with_an_error(handbook_pipeline, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda settings, with_reranker=None: handbook_pipeline)
+
+    assert cli.main(["search", "  \t "]) == 2
+    captured = capsys.readouterr()
+    assert "empty" in captured.err and captured.out == ""
+
+
+def test_ingest_with_a_symlink_in_the_folder_exits_with_an_error(make_pipeline, monkeypatch, tmp_path, capsys):
+    shared = make_pipeline()
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda settings, with_reranker=None: shared)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\n\n## One\n\nFirst.\n")
+    (docs / "elsewhere.md").symlink_to(tmp_path / "missing.md")
+
+    assert cli.main(["ingest", str(docs)]) == 2
+    assert "is a symbolic link" in capsys.readouterr().err
+    assert shared.index.sources() == []

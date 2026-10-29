@@ -6,6 +6,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .chunking import check_chunk_size
+
+
+class ConfigError(ValueError):
+    """A setting has a value the service can't run with."""
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -22,6 +28,12 @@ class Settings:
     max_chunk_chars: int = 1200
     top_k: int = 5
 
+    def __post_init__(self) -> None:
+        try:
+            check_chunk_size(self.max_chunk_chars, "max_chunk_chars")
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from None
+
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ
@@ -34,6 +46,17 @@ class Settings:
             claude_effort=env.get("SOURCED_CLAUDE_EFFORT", cls.claude_effort),
             answerer=env.get("SOURCED_ANSWERER", "claude" if has_key else "extractive"),
             rerank=env.get("SOURCED_RERANK", "true").lower() in ("1", "true", "yes"),
-            max_chunk_chars=int(env.get("SOURCED_MAX_CHUNK_CHARS", cls.max_chunk_chars)),
+            max_chunk_chars=_chunk_chars(env.get("SOURCED_MAX_CHUNK_CHARS")),
             top_k=int(env.get("SOURCED_TOP_K", cls.top_k)),
         )
+
+
+def _chunk_chars(raw: str | None) -> int:
+    if raw is None:
+        return Settings.max_chunk_chars
+    try:
+        return check_chunk_size(int(raw.strip()), "SOURCED_MAX_CHUNK_CHARS")
+    except ValueError:
+        raise ConfigError(
+            f"SOURCED_MAX_CHUNK_CHARS must be a whole number of characters above 0, got {raw!r}"
+        ) from None

@@ -22,6 +22,10 @@ Mode = Literal["bm25", "dense", "hybrid"]
 RRF_K = 60
 
 
+class EmptyQueryError(ValueError):
+    """The query has no text to search for."""
+
+
 class Reranker(Protocol):
     def score(self, query: str, passages: list[str]) -> list[float]: ...
 
@@ -66,6 +70,8 @@ class Retriever:
         self.candidates = candidates
 
     def search(self, query: str, top_k: int = 5, mode: Mode = "hybrid", rerank: bool = False) -> list[SearchResult]:
+        if not query.strip():
+            raise EmptyQueryError("the query is empty")
         rankings: dict[str, list[str]] = {}
         if mode in ("bm25", "hybrid"):
             rankings["bm25"] = self.index.bm25(query, self.candidates)
