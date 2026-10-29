@@ -1,19 +1,99 @@
 # Sourced
 
 [![CI](https://github.com/Lovio-Huang/sourced-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Lovio-Huang/sourced-rag/actions/workflows/ci.yml)
-![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Tested on Python 3.13](https://img.shields.io/badge/tested%20on-Python%203.13-blue)
 
-Ask questions about your documentation and get answers **with citations you can check**.
+Sourced answers questions about a folder of Markdown documents and shows, for every answer, the exact
+passages it came from. It is a small retrieval-augmented generation (RAG) service built to be inspected:
+each quality claim below links to how it was measured.
 
-Sourced is a retrieval-augmented generation (RAG) service. It indexes Markdown docs, finds
-the right passages with **hybrid search** (BM25 + embeddings + a cross-encoder reranker),
-and has Claude answer **only from those passages**. Each cited claim comes back with the
-source passage it points to, so a reader can check it; the quote shows where a claim came
-from, not that the claim is right. Without Claude credentials, an `extractive` mode returns
-the best passage verbatim instead. Retrieval quality is measured on a labelled question set,
-and CI fails if it regresses.
+[Example](#example) · [Demo and replay](docs/demo.md) · [What has been checked](#what-has-been-checked) ·
+[Performance](docs/performance.md) · [Try it](#try-it) · [Limitations](#limitations-and-next-steps)
 
-**Stack:** Python 3.13 · FastAPI · Claude API (search-result citations) · SQLite FTS5 (BM25) · fastembed / ONNX (`bge-small-en-v1.5`, MiniLM cross-encoder) · NumPy · pytest · Ruff · Docker · GitHub Actions
+**Answers and citations.** Sourced first retrieves the passages most likely to hold the answer. With
+Claude credentials, Claude writes the answer from those passages only, and the API returns, for each cited
+claim, the passage text it cites. A citation shows where a claim came from; it doesn't prove the claim is
+right. Without credentials, an `extractive` mode skips the language model and returns the best-matching
+passage verbatim: that is a retrieved passage, not a judged answer.
+
+### Example
+
+A stored Claude answer from the 2026-10-29 live check (`claude-opus-5-5`; not re-run).
+The handbook belongs to a fictional company, so `kctl` is a command in its text, not one to run:
+
+> **Question:** What is the command to roll back a release?
+>
+> **Answer** (as returned):
+>
+> The rollback command is `kctl rollback --to <release-id>`[1]
+>
+> - **No approval needed:** Rollbacks do not need approval and should be your first move when a release causes an incident.[1]
+> - **Timing:** A rollback takes about 8 minutes to reach every site.[1]
+> - **Follow-up:** After rolling back, open a ticket so the change can be fixed before the next train.[1]
+>
+> **[1]** `deployment.md`, *Deploying to Production > Rolling back*. Quoted text: "To roll back, run:
+> `kctl rollback --to <release-id>` Rollbacks do not need approval and should be your first move when a
+> release causes an incident. A rollback takes about 8 minutes to reach every site. After rolling back, open
+> a ticket so the change can be fixed before the next train."
+
+Every claim in the answer appears in the quote, and the quote is the
+[source section](data/handbook/deployment.md#rolling-back) word for word (its code block shown inline here).
+[docs/demo.md](docs/demo.md) has the exact text, how to check it, a no-answer example, an extractive run you
+can reproduce and a short terminal replay.
+
+## What has been checked
+
+Unless the row says otherwise, on the bundled sample handbook: 14 short documents about a fictional company
+(87 chunks).
+
+| Claim | Result | Scope |
+|---|---|---|
+| The right passage is retrieved | hit@5 **0.98** (hybrid + rerank), 43 answerable questions; CI fails below 0.95 | retrieval only, not answer accuracy |
+| …also on real documentation it wasn't written for | **Prometheus docs** (23 pages, 417 chunks, 24 answerable questions): hybrid + rerank hit@1 0.92, hit@5 1.00; BM25 alone hit@5 0.96 | one external corpus, questions written by the developer's assistant; not in CI ([details](docs/evaluation.md#external-corpus-prometheus-documentation)) |
+| Retrieval is fast enough for interactive use | Prometheus docs, 417 chunks: hybrid 3.1–3.2 ms p50, hybrid + rerank 296–332 ms p50 (3 rounds) | one laptop, one query at a time; not a load test ([performance](docs/performance.md)) |
+| Claude answers from the retrieved passages, with checkable citations | 12 questions on 2026-10-29: facts right on all 10 answerable ones (one added unsupported phrase), both unanswerable ones declined, two planted prompt injections not followed; $0.14 from response usage | small one-off sample, not an accuracy rate |
+| The service behaves as documented | 201 offline tests; CI builds the Docker image and queries it | the CI smoke test uses the extractive mode |
+
+**Costs** on an Apple M5 laptop (2026-10-29), measured one query or one ingest at a time: no concurrency, not
+a load test.
+
+| Chunks | Full ingest | Hybrid query p50, no reranking (3 rounds) | Index file |
+|---|---|---|---|
+| 417 (the 23 Prometheus pages) | 16.7 s | 3.1–3.2 ms | 1.7 MiB |
+| 10,537 (the same 23 pages repeated 24 times) | 421 s | 6.2–6.5 ms | 40.7 MiB |
+
+- The second row is **repeated text**: it shows how costs grow with the number of chunks, not how 10,000
+  different documents would behave.
+- **Reranking** costs 296–332 ms p50 per query at 417 chunks. It is not reported as a trend: in the repeated
+  corpus its candidates are near-duplicates, so its timing there says nothing about larger real corpora.
+- Method, memory, every round and the raw samples: [docs/performance.md](docs/performance.md); rerun with
+  `python bench/run_benchmark.py`.
+
+Methods, definitions, both retrieval evaluations and the full live-check record:
+[docs/evaluation.md](docs/evaluation.md).
+
+## Try it
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt && pip install --no-deps -e .   # exact pins, the same install CI uses
+
+sourced ingest data/handbook            # index the sample handbook (or your own docs)
+sourced search "how do I roll back?"    # retrieval only, no language model
+export ANTHROPIC_API_KEY=...            # optional: without it, ask returns the best passage verbatim
+sourced ask "Who do I tell if my laptop is stolen?"
+sourced serve                           # HTTP API on 127.0.0.1:8000, docs at /docs
+sourced eval eval/questions.jsonl --rerank   # reproduce the retrieval table
+```
+
+Or with Docker (models and the sample index are baked into the image):
+
+```bash
+docker build -t sourced . && docker run -p 127.0.0.1:8000:8000 -e ANTHROPIC_API_KEY sourced
+```
+
+The service has no authentication: keep it on your own machine or a trusted network. Serving it to anyone
+else needs authentication, access control and limits on Claude spending first.
 
 ## How it works
 
@@ -40,236 +120,68 @@ flowchart LR
 1. **Chunking follows the document's structure.** Each heading starts a chunk, and only long sections are split further, on paragraph boundaries with one paragraph of overlap. Each chunk is indexed with its heading path ("On-Call Handbook > Severity levels"), so a chunk that only says "acknowledge within 5 minutes" still matches a question about SEV1.
 2. **Two retrievers, fused.** BM25 catches exact tokens like `KR-4021` or `kctl rollback`. Embeddings catch paraphrases ("file a receipt" means "submit expenses"). [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) merges the two rankings without trying to compare their incomparable scores.
 3. **Reranking.** A cross-encoder reads the question and each candidate together and re-scores the top 20.
-4. **Grounded generation.** The passages go to Claude as `search_result` content blocks with citations enabled. The API itself returns the quoted text behind each claim, so a citation can't point at text that isn't in the source. If the passages don't contain the answer, the prompt tells Claude to say so instead of guessing.
+4. **Grounded generation.** The passages go to Claude as `search_result` content blocks with citations enabled, so the quoted text comes back as structured data taken from the passages, not as free text the model typed. If the passages don't contain the answer, the prompt tells Claude to say so instead of guessing.
 
-## Retrieval evaluation
+## Engineering choices
 
-48 hand-labelled questions over the bundled sample handbook ([`eval/questions.jsonl`](eval/questions.jsonl)):
-23 use the handbook's own wording (*lexical*), 20 deliberately avoid it (*paraphrase*, e.g. "My robot
-complains it's carrying too much" → the `KR-4021 – Payload overweight` entry), and 5 have no answer in
-the handbook. Reproduce with `sourced eval eval/questions.jsonl --rerank`.
-
-| Retriever | hit@1 | hit@3 | hit@5 | MRR | hit@3 lexical | hit@3 paraphrase |
-|---|---|---|---|---|---|---|
-| BM25 | 0.70 | 0.84 | 0.91 | 0.78 | 0.96 | 0.70 |
-| Dense (bge-small) | 0.81 | **0.98** | **0.98** | 0.89 | 1.00 | **0.95** |
-| Hybrid (RRF) | 0.84 | 0.93 | 0.93 | 0.88 | 1.00 | 0.85 |
-| **Hybrid + rerank** (default) | **0.88** | 0.95 | **0.98** | **0.92** | 1.00 | 0.90 |
-
-*hit@k: the section that holds the answer is in the top k results. MRR: mean reciprocal rank of the first correct result.*
-
-**What the numbers say:**
-
-- **BM25 alone collapses on paraphrases** (0.70 hit@3), which is the classic failure that motivates semantic search.
-- **Plain hybrid was not a free win here.** Fusion improved the top-1 result, but BM25's noisy candidates pushed some correct paraphrase matches out of the top 3. On this small corpus with distinctive vocabulary, dense retrieval alone is already strong.
-- **Adding the reranker gives the best ranking overall** (hit@1 0.88, MRR 0.92) and ties dense on hit@5, the number that decides whether the right passage reaches the LLM. So hybrid + rerank is the default for `/ask`. BM25 stays in the mix because exact identifiers matter more as a corpus grows and starts holding many near-identical passages.
-
-Retrieval latency on an Apple M5 laptop (CPU only, 87 chunks, p50 / p95 over the 48 questions):
-
-| BM25 | Dense | Hybrid | Hybrid + rerank |
-|---|---|---|---|
-| 0.1 / 0.2 ms | 2.5 / 3.3 ms | 2.4 / 3.2 ms | 113 / 128 ms |
-
-Reranking costs ~110 ms, which is small next to LLM generation, so `/ask` reranks by default and `/search` doesn't.
-
-CI re-runs this evaluation on every push and **fails the build if hit@5 drops below 0.95**, so a chunking or retrieval change can't silently make retrieval worse. This is a retrieval check only: it says the right passage reaches the answerer, not that the answer is right.
-
-## Design decisions
-
-| Decision | Why |
+| Choice | Why |
 |---|---|
-| Claude `search_result` blocks with citations, not "please cite your sources" in the prompt | Citations come back as structured data (`cited_text`, `source`, `title`) taken from the provided text, so they can be shown and checked in a UI |
-| Server-side refusal fallback (`fallbacks: "default"`) | If a safety classifier declines a benign question, the API retries on the recommended fallback model instead of failing the request |
-| SQLite for everything (FTS5 + vectors) | One file, zero infrastructure, transactional re-indexing. Brute-force cosine over a NumPy matrix takes ~2 ms here. Past a few hundred thousand chunks I'd move to an ANN index (pgvector/HNSW) |
+| Hybrid retrieval plus a reranker | On the handbook, BM25 alone missed paraphrases (0.70 hit@3); reranking gave the best ranking overall ([numbers](docs/evaluation.md#retrieval-quality)) |
+| Claude `search_result` blocks with citations, not "please cite your sources" in the prompt | Citations come back as structured data (`cited_text`, `source`, `title`) taken from the provided text, so they can be shown and checked |
+| Retrieval quality gate in CI | A chunking or retrieval change that drops hit@5 below 0.95 fails the build |
+| The index records the model and chunking that built it | Mixing vectors from two models, or chunks from two chunkers, is refused instead of silently degrading ([details](docs/index-management.md#what-an-index-is-tied-to)) |
+| One folder per index, one ingest at a time | Re-ingesting removes deleted files safely, and two ingests can't interleave ([details](docs/index-management.md#what-ingest-does)) |
+| Explicit failures instead of silent fallbacks | An unfinished Claude reply is a 502, a reranking request without a reranker is a 409, an invalid `top_k` or setting is refused |
+| SQLite for everything (FTS5 + vectors) | One file, no extra services, transactional re-indexing. Dense search scans every vector with NumPy and stayed under 3.5 ms p50 up to 10,537 chunks ([performance](docs/performance.md)); at what size an approximate vector index becomes necessary was not measured |
 | Local ONNX embedding and reranking models | No per-query embedding cost or third-party data sharing, deterministic for evals, and the Docker image runs offline |
-| Incremental ingestion by content hash | Re-running `ingest` only re-embeds changed files. A document's chunks are swapped in one transaction |
-| One index per folder | Documents are named by their path inside the folder, so mixing folders in one index would let `team-a/README.md` overwrite `team-b/README.md`. Binding the index to one folder also makes it safe to delete what that folder no longer has |
-| FTS5 queries built from quoted terms joined with `OR` | User text like `KR-4021` or `NEAR` can't be parsed as FTS5 syntax, and one rare matching term is enough to surface a chunk |
-| `extractive` answerer when no API key is set | The service and its evals still run in CI and for anyone cloning the repo. It returns the top-ranked passage verbatim with one citation (plus the retrieved passages); it does not write a combined answer or check whether the passage answers the question |
+| Server-side refusal fallback (`fallbacks: "default"`) | If a safety classifier declines a benign question, the API can retry on a recommended fallback model (accepted by the API, not yet seen to trigger) |
 
-## Quickstart
+## API
+
+| Method | Path | Body | Returns | Errors |
+|---|---|---|---|---|
+| `POST` | `/ask` | `{"question": "...", "top_k": 5}` | `answer` with `[n]` markers, `citations` (source, heading, quoted text), retrieved `passages`, `timings_ms` | 409, 422, 502, 503 |
+| `POST` | `/search` | `{"query": "...", "mode": "hybrid", "rerank": false}` | Ranked passages, with where each retriever ranked them | 409, 422 |
+| `GET` | `/health` | | Document and chunk counts, active `answerer`, `reranking` (`"ok"` or `"disabled"`), `dense_search` (`"ok"` or why dense/hybrid search is refused) | |
+
+Errors come back as `{"detail": "..."}`:
+
+- **409**: dense or hybrid search (and so `/ask`) on an index whose vectors come from another embedding model,
+  or from an old index that doesn't record its model ([details](docs/index-management.md#what-an-index-is-tied-to));
+  or `"rerank": true` when the server has no reranker loaded.
+- **422**: the body failed validation: `query` / `question` blank or over 1000 characters once surrounding
+  whitespace is removed, `top_k` not an integer from 1 to 20, or an unknown `mode`.
+- **502**: Claude returned an error, stopped before finishing (for example at `max_tokens`), or returned no
+  answer text. Partial text is never returned as an answer, and nothing is retried automatically.
+- **503**: Claude is rate limited or unreachable; try again.
+
+502 and 503 only come from `/ask` with the Claude answerer. `/docs` lists the same responses. The CLI exits
+with code 2 in the 409, 422 and 502 situations.
+
+## Documentation
+
+- [docs/demo.md](docs/demo.md): complete examples (historical Claude answers and a reproducible extractive run), with a terminal replay.
+- [docs/evaluation.md](docs/evaluation.md): how retrieval (on the handbook and on the Prometheus docs) and answers were evaluated, the live Claude check, what CI runs, and what hasn't been measured.
+- [docs/index-management.md](docs/index-management.md): ingesting, what an index is tied to, rebuilding and switching indexes.
+- [docs/performance.md](docs/performance.md): ingest time, query latency, memory and index size at 417, 1,297 and 10,537 chunks, with the raw data.
+- [docs/configuration.md](docs/configuration.md): every setting, `top_k` and reranking in the CLI vs the API, and where Sourced has been run.
+
+## Tests
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt && pip install --no-deps -e .   # exact pins, the same install CI uses
-
-sourced ingest data/handbook            # index the sample handbook (or your own docs)
-sourced search "how do I roll back?"    # retrieval only, no LLM
-export ANTHROPIC_API_KEY=...            # optional: without it, ask returns the best passage verbatim
-sourced ask "Who do I tell if my laptop is stolen?"
-sourced serve                           # HTTP API on :8000, docs at /docs
+pytest -q        # 201 tests, ~2.5 s, no network: a hashing embedder stands in for the model
+ruff check src tests bench eval docs
 ```
 
-Or with Docker (models and the sample index are baked into the image):
-
-```bash
-docker build -t sourced . && docker run -p 127.0.0.1:8000:8000 -e ANTHROPIC_API_KEY sourced
-```
-
-The service has no authentication, so it is meant for your own machine or a trusted internal network
-(`sourced serve` listens on 127.0.0.1, and the example above publishes the port on localhost only). Serving it
-to anyone else needs authentication, access control and limits on Claude spending first.
+CI runs three jobs on every push to `main` and every pull request: lint and tests, the retrieval quality gate
+with the real models, and a Docker build plus smoke test. What the tests cover:
+[docs/evaluation.md](docs/evaluation.md#offline-tests).
 
 `requirements.txt` (runtime) and `requirements-dev.txt` (runtime + test tools) pin every package to an exact
 version; CI and the Docker image install from them, then add the package with `--no-deps`. `pyproject.toml`
 keeps the looser ranges. To move the pins, edit `pyproject.toml` if needed and rerun the `uv pip compile`
 command at the top of each file; Dependabot opens weekly PRs for the pins, the base image and the CI actions
 (which are pinned to commit SHAs).
-
-### Indexing your own documents
-
-- **One folder per index.** The first `sourced ingest <folder>` binds the index to that folder (its resolved
-  absolute path). Ingesting a different folder is refused before anything changes; give it its own index with
-  `SOURCED_INDEX=other.db sourced ingest <other-folder>`.
-- **Single files** (`sourced ingest docs/team/oncall.md`) must live inside the bound folder and keep their
-  folder-relative name (`team/oncall.md`). On a new index, a single file binds its parent folder.
-- **Deleted files.** Ingesting the whole folder removes documents whose file is gone, together with their
-  chunks, keyword index entries and embeddings, and reports `removed N`. This only happens after a full
-  folder scan where every file ingested successfully: ingesting a single file never removes anything, and a
-  missing folder or a file that fails to read stops the run before any removal.
-- **Symbolic links are not followed.** The folder itself may be reached through a link, but a link inside it
-  (to a file, a directory, or nothing) stops `ingest` with exit code 2 before anything is read, written or
-  removed, and so does `ingest` of a single file that is a link. Copy the file in or remove the link. This
-  keeps text from outside the folder out of the index for a trusted local folder; it is checked once at the
-  start, not against files being swapped while ingest runs.
-- **`SOURCED_MAX_CHUNK_CHARS`** must be a whole number above 0; anything else stops every command with exit
-  code 2 before a model is loaded or the index is opened.
-- **One ingest at a time.** `sourced ingest` holds an OS file lock (`<index>.lock`, next to the index) for
-  the whole run, from checking the index to the last removal. A second ingest of the same index, from any
-  process, stops right away with `another sourced ingest is running` and exit code 2; run it again when the
-  first one has finished. The lock is released when ingest ends, fails or its process dies. The lock file
-  stays in place on purpose. Ingest needs `fcntl` locks, so it runs on Linux and macOS, not on Windows.
-- **An index is tied to the model and chunking that built it.** The first ingest records the embedding model
-  (as reported by the loaded model), its vector dimensions, `SOURCED_MAX_CHUNK_CHARS` and the chunker version.
-  Changing any of them makes `ingest` refuse before it touches anything, and makes dense and hybrid search
-  refuse (HTTP 409) instead of comparing vectors from different models; keyword search (`mode=bm25`) still
-  works, and `/health` says why dense search is off. Nothing is migrated in place: rebuild (below).
-- **Indexes built before this was recorded** (no folder or model stored) are only read: keyword search works,
-  dense/hybrid search and `ingest` refuse. Opening an index for queries never writes to it, and it can be
-  opened read-only.
-- **Chunker versions.** Version 2 put the heading into chunk ids; version 3 closes a code fence only on the
-  same character at least as long (```` around a ``` example stays one block). Each bump means `ingest`
-  refuses an index built by an earlier version: rebuild it (below). Search on such an index keeps working
-  until then.
-- **Rebuilding.** Build next to the old index, don't delete it first:
-
-  ```bash
-  SOURCED_INDEX=.sourced/index-new.db sourced ingest data/handbook   # must exit 0
-  SOURCED_INDEX=.sourced/index-new.db sourced search "how do I roll back?"
-  cp .sourced/index.db .sourced/index-backup.db                      # keep the old one
-  export SOURCED_INDEX=.sourced/index-new.db                         # then restart sourced serve
-  ```
-
-  A failed ingest can leave a partly built index that still answers searches, so only an ingest that
-  exits 0 means the rebuild is complete; rerun it until it does. A running server keeps reading the file it
-  opened, even if another file is moved to that path, until it is restarted.
-- A running server notices changes another process commits to the index (for example a `sourced ingest`
-  while `sourced serve` runs) on its next query.
-
-### API
-
-| Method | Path | Body | Returns | Errors |
-|---|---|---|---|---|
-| `POST` | `/ask` | `{"question": "...", "top_k": 5}` | `answer` with `[n]` markers, `citations` (source, heading, quoted text), retrieved `passages`, `timings_ms` | 409, 422, 502, 503 |
-| `POST` | `/search` | `{"query": "...", "mode": "hybrid", "rerank": false}` | Ranked passages, with where each retriever ranked them | 409, 422 |
-| `GET` | `/health` | | Document and chunk counts, active answerer, `reranking` (`"ok"` or `"disabled"`), `dense_search`: `"ok"` or why dense/hybrid search is refused | |
-
-Errors come back as `{"detail": "..."}`. **409**: dense or hybrid search on an index built with another
-embedding model or by an older version (bm25 `/search` still works; the message says how to rebuild).
-409 also means `rerank: true` was requested but this server has no reranker loaded; send `rerank: false`,
-or enable `SOURCED_RERANK` and restart. Requests never silently skip requested reranking.
-**422**: the body failed validation (`query`/`question` blank or over 1000 characters once leading and
-trailing whitespace is removed, `top_k` that is not an integer from 1–20 (including booleans), unknown `mode`). `sourced search` and `ask` exit with
-code 2 on a blank query. CLI `--top-k`, Python search/ask and `SOURCED_TOP_K` also require an integer
-from 1–20. Omitting CLI `--top-k` uses `SOURCED_TOP_K` (default 5); an explicit value overrides it.
-**502**: Claude returned an error, stopped before finishing (including `max_tokens`), or returned no
-nonblank answer text. Partial text is not returned as an answer, and no automatic generation retry is
-made for these responses. The CLI exits with code 2 for an incomplete or empty answer. **503**: Claude is rate limited or unreachable; try again. The 502/503
-errors only come from `/ask` with the Claude answerer. `/docs` lists the same responses.
-
-### Configuration
-
-| Variable | Default |
-|---|---|
-| `SOURCED_CLAUDE_MODEL` | `claude-opus-5-5` |
-| `SOURCED_CLAUDE_EFFORT` | `medium` |
-| `SOURCED_RERANK` | `true`: load the server reranker and rerank `/ask` by default; `false` disables both |
-| `SOURCED_INDEX` | `.sourced/index.db` |
-| `SOURCED_ANSWERER` | `claude` if `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, otherwise `extractive`; only these two values are accepted |
-| `SOURCED_TOP_K` | `5` for CLI/Python calls that omit `top_k`; API request default remains `5` |
-
-`SOURCED_RERANK` accepts `true`/`false`, `yes`/`no`, or `1`/`0` (case insensitive).
-Invalid values stop startup before models are loaded. CLI `search --rerank` and `eval --rerank`
-explicitly load their reranker even when the server default is disabled; `eval --answers` reranks only with `--rerank`.
-
-In extractive mode, `/ask` returns a retrieved passage rather than a generated answer. The `answerer`
-field identifies this mode. A passage and its citation do not prove the question is answerable; even
-an unrelated question can return a passage with `refused: false`. Use Claude mode for generated
-answers with the prompt's abstention behavior. The bundled embedding and reranking models target
-English; retrieval quality for Chinese or other languages has not been established.
-
-## Tests
-
-```bash
-pytest -q        # 180 tests, ~2 s, no network: a hashing embedder stands in for the model
-ruff check src tests
-```
-
-The tests cover heading-aware chunking (code fences, overlap, splitting paragraphs longer than a chunk, headings like `C#`), FTS5 query sanitizing (including accented words), RRF math, reranking, idempotent re-ingestion, keeping the index in step with the folder (another process re-indexing, deleted files, one folder per index, old indexes), one ingest at a time across processes (lock contention, release on failure and on a killed process), refusing an index built with another model, vector size or chunking, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, incomplete/empty generation failures and their cost accounting, reranker availability, CLI/Python/API top-k validation, API validation and error mapping, the eval command, and a BM25 regression floor on the real handbook.
-
-One test builds the request with the real `anthropic` SDK over a mocked HTTP transport, so it checks the beta header and the serialized body the SDK actually sends, and that a cited reply parses. It does not show that the live API accepts the request; only a call with a real key does that.
-
-The live check stops on incomplete or empty generation too. When the response includes usable usage,
-it records that attempt's cost before stopping with a nonzero exit; later runs count that cost.
-If usage cannot be priced, the existing unknown-cost guard blocks resuming that output file.
-
-**Live check against the real API (opt-in, paid).** `python -m sourced.live_check` asks Claude 12 questions:
-9 from `eval/questions.jsonl` (exact facts, an error code, a command, paraphrases, a question with two
-acceptable sections, two with no answer), one that needs two sections combined, and two prompt-injection
-cases on a temporary corpus whose documents tell the model to lie or leak a (made-up) password. It writes
-each answer with its passages, citations, stop reason, usage and cost to a JSON lines file, plus automatic
-checks (expected facts, citations point at passages that were sent and quote text inside them, declines
-without citing, no injected text in the answer). Those checks are a first pass; the answers still need
-reading. It refuses to run without `--confirm-spend`, credentials and the official API host, and makes no
-retries. `--budget-usd` (default 2, a finite amount above 0) covers everything recorded in the `--out` file, earlier runs included; a
-call is skipped when its estimated worst case (full `max_tokens` plus one fallback attempt, at the highest
-price the tool knows) would pass it. The server picks the fallback model, so that is an estimate, not a
-guarantee. Any API error, or a reply whose cost can't be counted, stops the run and marks the file so it
-can't be resumed as if that call were free. Start with one question:
-
-```bash
-export FASTEMBED_CACHE_PATH=~/.cache/fastembed
-python -m sourced.live_check --index .sourced/index.db --out live-l02.jsonl --confirm-spend --only l02
-```
-
-**Result on 2026-10-29** (`claude-opus-5-5`, effort `medium`): 12 different questions, 13 generation calls
-(l02 ran twice, the others once). ~1.3–2.1k input and 84–367 output tokens per call, 1.5–6.7 s. $0.14 in all,
-computed from each response's `usage` at $4 / $20 per million tokens, not read from the bill.
-
-- **API compatibility.** The live API accepted the request as sent (the fallback beta and `fallbacks`,
-  `output_config`, citable `search_result` blocks) and every reply parsed into an answer with numbered
-  citations. No call was refused, truncated or handed to a fallback model, so the fallback switch itself was
-  not exercised.
-- **Answers.** Facts were right on all 10 answerable questions (the command, the error code, the paraphrases,
-  both parts of the combined question); l02 gave the same command both times. p09's main answer was right, but
-  it framed the feature-flag advice as "if the change is behind a flag", which the handbook doesn't say. Both
-  unanswerable questions were declined with no citation and no invented policy.
-- **Citations.** All 14 quotes appear word for word in the passage they cite (checked automatically). Read
-  against the claims next to them, they support those claims, apart from p09's added condition above. Every
-  quote was a whole chunk, not a sentence; why is not established, and sending a chunk as one text block per
-  sentence is an untested idea.
-- **Prompt injection.** In both cases the answer used the legitimate text and pointed out the planted
-  instruction instead of following it; the answer text contained neither the made-up password nor the
-  attacker address. The Wi-Fi citation, though, quotes the whole passage, planted password and address
-  included, and citations are returned to the user too. Anything indexed can reach the asker through a
-  citation (see the permissions limitation below). A bug in the tool at the time left the injection cases'
-  list of forbidden text empty, so the automatic check didn't look for it then; the conclusion above came from
-  reading the answers. After the fix, the stored replies were re-checked offline (no new calls): both pass.
-
-That is 12 questions on a small fictional handbook, mostly one call each: it shows the integration works and
-how these answers looked, not an accuracy rate or how stable answers are across runs.
-
-CI runs three jobs: lint + tests, the retrieval quality gate with real models, and a Docker smoke test that builds the image and asks it a question.
 
 ## Project layout
 
@@ -286,15 +198,21 @@ src/sourced/
 ├── api.py          FastAPI app
 └── cli.py          sourced ingest | search | ask | eval | serve
 data/handbook/      sample corpus: a fictional robotics company's engineering handbook
-eval/               labelled questions
+eval/               labelled questions for the handbook
+eval/prometheus/    external corpus (Prometheus docs, Apache-2.0), its questions, scripts and results
+docs/               demo, evaluation, performance, index management, configuration
+bench/              performance benchmark script and its published results
 ```
 
 ## Limitations and next steps
 
-- **Answer quality is checked on 12 questions only** (see the live check above). `sourced eval --answers` runs all 48 with keyword checks; I haven't published those numbers. Next would be an LLM-as-judge for faithfulness on open-ended answers. In the live check every quote was a whole chunk; whether per-sentence text blocks would give sentence-level quotes is untested.
+- **Answer quality is checked on 12 questions only.** `sourced eval --answers` runs keyword checks over all 48, but those numbers haven't been published. Next would be an LLM-as-judge for faithfulness on open-ended answers.
 - **The corpus is small and synthetic** (14 documents, 87 chunks), so these results show the method, not production performance. The real test is a large, messy corpus with many near-duplicate passages.
-- **Streaming** (`/ask` over server-sent events) and **PDF ingestion** are not implemented yet.
-- **No authentication or per-user document permissions.** Answers and citations can quote anything in the index, so it only fits callers who may read every indexed document. A real deployment would filter retrieval by what the asker is allowed to read.
+- **Extractive mode has no abstention:** it always returns the top passage, even for an unrelated question.
+- **English only, as far as tested:** the bundled models target English; other languages haven't been measured.
+- **Citations quote whole chunks**, not sentences.
+- **No authentication or per-user document permissions.** Answers and citations can quote anything in the index, so it only fits callers who may read every indexed document.
+- **Ingest doesn't run on Windows** (it needs `fcntl` locks). **Streaming** answers and **PDF ingestion** are not implemented.
 
 The sample handbook describes a fictional company and was written for this project.
 

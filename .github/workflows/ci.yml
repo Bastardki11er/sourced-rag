@@ -17,8 +17,8 @@ jobs:
           cache: pip
       # Same install as local dev: exact pins first, then the package itself without resolving again.
       - run: pip install -r requirements-dev.txt && pip install --no-deps -e . && pip check
-      - run: ruff check src tests
-      - run: ruff format --check src tests
+      - run: ruff check src tests bench eval docs
+      - run: ruff format --check src tests bench eval docs
       - run: pytest -q
 
   retrieval-eval:
