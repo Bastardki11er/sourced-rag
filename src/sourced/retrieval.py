@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from .chunking import Chunk
+from .config import check_top_k
 from .embeddings import Embedder
 from .store import Index, IndexConfigError
 
@@ -24,6 +25,10 @@ RRF_K = 60
 
 class EmptyQueryError(ValueError):
     """The query has no text to search for."""
+
+
+class RerankUnavailableError(ValueError):
+    """Reranking was requested but no reranker is loaded."""
 
 
 class Reranker(Protocol):
@@ -70,6 +75,11 @@ class Retriever:
         self.candidates = candidates
 
     def search(self, query: str, top_k: int = 5, mode: Mode = "hybrid", rerank: bool = False) -> list[SearchResult]:
+        check_top_k(top_k)
+        if rerank and self.reranker is None:
+            raise RerankUnavailableError(
+                "Reranking is disabled on this server. Set rerank=false, or enable SOURCED_RERANK and restart."
+            )
         if not query.strip():
             raise EmptyQueryError("the query is empty")
         rankings: dict[str, list[str]] = {}

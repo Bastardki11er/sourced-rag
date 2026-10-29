@@ -31,7 +31,7 @@ import anthropic
 
 from .config import Settings
 from .evaluation import load_questions
-from .generation import MAX_TOKENS, NOT_FOUND, Answer, ClaudeAnswerer
+from .generation import MAX_TOKENS, NOT_FOUND, Answer, ClaudeAnswerer, GenerationError
 from .pipeline import Pipeline
 from .retrieval import Retriever, SearchResult
 from .store import Index
@@ -223,8 +223,13 @@ def _ask_each(pipeline: Pipeline, cases: list[Case], budget: float, out: Path, r
                 break
             responses.clear()
             started = time.perf_counter()
+            generation_error = None
             try:
                 answer = pipeline.answerer.answer(case.question, results)
+            except GenerationError as exc:
+                # The API returned a response and may have billed it. Count its usage
+                # before stopping, even though no complete answer can be returned.
+                generation_error = exc
             except anthropic.APIError as exc:  # not a refusal and not an extractive fallback: stop and report
                 # A timeout or server error may still be billed, so the cost is unknown, not zero.
                 record["error"] = {"type": type(exc).__name__, "status": getattr(exc, "status_code", None)}
@@ -243,6 +248,17 @@ def _ask_each(pipeline: Pipeline, cases: list[Case], budget: float, out: Path, r
                 print(f"{case.id}: cost can't be counted ({exc}); stopping")
                 return None
             spent += cost
+            if generation_error is not None:
+                record |= {
+                    "model": response.model,
+                    "stop_reason": response.stop_reason,
+                    "usage": response.usage.model_dump(mode="json", exclude_none=True),
+                    "cost_usd": round(cost, 5),
+                    "seconds": round(seconds, 2),
+                    "error": {"type": type(generation_error).__name__, "message": str(generation_error)},
+                }
+                f.write(json.dumps(record) + "\n")
+                raise generation_error
             record |= {
                 "model": response.model,
                 "stop_reason": response.stop_reason,
@@ -262,9 +278,6 @@ def _ask_each(pipeline: Pipeline, cases: list[Case], budget: float, out: Path, r
                 f"{case.id}: {response.stop_reason}, ${cost:.4f}, {seconds:.1f}s, "
                 f"{'checks ok' if not failed else 'FAILED ' + ', '.join(failed)}"
             )
-            if response.stop_reason == "max_tokens":
-                print(f"{case.id}: output was cut off at max_tokens; stopping")
-                break
     return spent
 
 
@@ -319,24 +332,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no case {args.only}", file=sys.stderr)
         return 2
 
-    spent = run(pipeline, cases, args.budget_usd, args.out) if cases else spent_so_far(args.out)
-    if injection and spent is not None:
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "docs"
-            folder.mkdir()
-            for name, text in INJECTION_DOCS.items():
-                (folder / name).write_text(text)
-            temp_index = Index(Path(tmp) / "index.db")
-            other = Pipeline(
-                replace(settings, index_path=Path(tmp) / "index.db"),
-                temp_index,
-                embedder,
-                answerer,
-                Retriever(temp_index, embedder, reranker),
-            )
-            other.ingest(folder)
-            spent = run(other, injection, args.budget_usd, args.out)
-            temp_index.close()
+    try:
+        spent = run(pipeline, cases, args.budget_usd, args.out) if cases else spent_so_far(args.out)
+        if injection and spent is not None:
+            with tempfile.TemporaryDirectory() as tmp:
+                folder = Path(tmp) / "docs"
+                folder.mkdir()
+                for name, text in INJECTION_DOCS.items():
+                    (folder / name).write_text(text)
+                temp_index = Index(Path(tmp) / "index.db")
+                other = Pipeline(
+                    replace(settings, index_path=Path(tmp) / "index.db"),
+                    temp_index,
+                    embedder,
+                    answerer,
+                    Retriever(temp_index, embedder, reranker),
+                )
+                try:
+                    other.ingest(folder)
+                    spent = run(other, injection, args.budget_usd, args.out)
+                finally:
+                    temp_index.close()
+    except GenerationError as exc:
+        print(f"stopped: {exc}; usage and cost recorded in {args.out}")
+        return 1
     if spent is None:
         print(f"stopped: a cost is unknown, so the total in {args.out} is incomplete; check the bill")
         return 1

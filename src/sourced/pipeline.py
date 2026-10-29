@@ -164,7 +164,7 @@ class Pipeline:
     def search(
         self, query: str, top_k: int | None = None, mode: Mode = "hybrid", rerank: bool = False
     ) -> list[SearchResult]:
-        return self.retriever.search(query, top_k or self.settings.top_k, mode, rerank)
+        return self.retriever.search(query, self.settings.top_k if top_k is None else top_k, mode, rerank)
 
     def ask(self, question: str, top_k: int | None = None, rerank: bool | None = None) -> AskResult:
         started = time.perf_counter()
