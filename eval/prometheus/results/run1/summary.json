@@ -1,0 +1,152 @@
+{
+  "corpus": {
+    "documents": 23,
+    "chunks": 417,
+    "source": "Prometheus v2.53.0 docs, see manifest.json"
+  },
+  "index": {
+    "embedding_model": "fastembed:BAAI/bge-small-en-v1.5",
+    "dimensions": "384",
+    "max_chunk_chars": "1200",
+    "chunker_version": "3"
+  },
+  "reranker": "Xenova/ms-marco-MiniLM-L-6-v2",
+  "code": {
+    "commit": "49b0871d8f7d62b09693f662bcf59360242820b4",
+    "src_uncommitted_changes": "none"
+  },
+  "files_sha256": {
+    "questions.jsonl": "96cdaf1f84d0bf47a284b61057f50fed64f400cf6153c3bc3e5ba97fc9fa0d93",
+    "evidence.jsonl": "180ce93620c2e0cde5b21c1f3c10302d5c646dfec7f42ec07043bb0b19c4f36a",
+    "manifest.json": "e50a44122f051c95fe84bd9298e954ec35f9d47278fd3cbe377a7a8754605033"
+  },
+  "questions": {
+    "exact": 8,
+    "paraphrase": 8,
+    "confusable": 8,
+    "unanswerable": 7
+  },
+  "metric_notes": "answerable questions only; ranks from the top 10; no gold in the top 10 counts as a miss for hit@k and 0 for MRR@10",
+  "results": {
+    "BM25": {
+      "all": {
+        "questions": 24,
+        "hit@1": 0.75,
+        "hit@3": 0.917,
+        "hit@5": 0.958,
+        "mrr@10": 0.837
+      },
+      "exact": {
+        "questions": 8,
+        "hit@1": 0.875,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.917
+      },
+      "paraphrase": {
+        "questions": 8,
+        "hit@1": 0.625,
+        "hit@3": 0.75,
+        "hit@5": 0.875,
+        "mrr@10": 0.719
+      },
+      "confusable": {
+        "questions": 8,
+        "hit@1": 0.75,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.875
+      }
+    },
+    "Dense": {
+      "all": {
+        "questions": 24,
+        "hit@1": 0.583,
+        "hit@3": 0.875,
+        "hit@5": 0.917,
+        "mrr@10": 0.73
+      },
+      "exact": {
+        "questions": 8,
+        "hit@1": 0.75,
+        "hit@3": 0.875,
+        "hit@5": 0.875,
+        "mrr@10": 0.792
+      },
+      "paraphrase": {
+        "questions": 8,
+        "hit@1": 0.25,
+        "hit@3": 0.75,
+        "hit@5": 0.875,
+        "mrr@10": 0.545
+      },
+      "confusable": {
+        "questions": 8,
+        "hit@1": 0.75,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.854
+      }
+    },
+    "Hybrid": {
+      "all": {
+        "questions": 24,
+        "hit@1": 0.708,
+        "hit@3": 0.917,
+        "hit@5": 1.0,
+        "mrr@10": 0.817
+      },
+      "exact": {
+        "questions": 8,
+        "hit@1": 0.75,
+        "hit@3": 0.875,
+        "hit@5": 1.0,
+        "mrr@10": 0.817
+      },
+      "paraphrase": {
+        "questions": 8,
+        "hit@1": 0.375,
+        "hit@3": 0.875,
+        "hit@5": 1.0,
+        "mrr@10": 0.635
+      },
+      "confusable": {
+        "questions": 8,
+        "hit@1": 1.0,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 1.0
+      }
+    },
+    "Hybrid + rerank": {
+      "all": {
+        "questions": 24,
+        "hit@1": 0.833,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.91
+      },
+      "exact": {
+        "questions": 8,
+        "hit@1": 0.75,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.875
+      },
+      "paraphrase": {
+        "questions": 8,
+        "hit@1": 0.875,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.917
+      },
+      "confusable": {
+        "questions": 8,
+        "hit@1": 0.875,
+        "hit@3": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.938
+      }
+    }
+  }
+}
