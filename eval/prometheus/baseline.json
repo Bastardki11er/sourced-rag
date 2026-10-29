@@ -1,0 +1,11 @@
+{
+  "questions.jsonl": "40572cad936129801b271eee6c4f5111abf5be71979edfa0aecb0b1625f1550a",
+  "evidence.jsonl": "0eef8d45142cd7a3eb11051327cb44d2ae63dd3630f4e2b645d4d716b6f28ac4",
+  "history": [
+    {
+      "questions.jsonl": "96cdaf1f84d0bf47a284b61057f50fed64f400cf6153c3bc3e5ba97fc9fa0d93",
+      "evidence.jsonl": "180ce93620c2e0cde5b21c1f3c10302d5c646dfec7f42ec07043bb0b19c4f36a",
+      "replaced_because": "After run 1: x01 lacked management_api.md/Quit and migration.md/Prometheus lifecycle, and x07 lacked querying/api.md/Delete Series. Each states the answer the same way as a section already labelled gold (rule: a section is gold if it states the asked fact about the asked thing). These fixes raise run-1 scores; run 1 is kept in results/run1."
+    }
+  ]
+}
