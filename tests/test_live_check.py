@@ -101,7 +101,7 @@ def claude_pipeline(make_pipeline, handbook_pipeline, quote_from_passage=True, m
     return pipeline, sent
 
 
-ROLLBACK = Case("l02", "lexical", "What is the command to roll back a release?", ["kctl rollback"])
+ROLLBACK = Case("l02", "lexical", "What is the command to roll back a release?", facts=["kctl rollback"])
 
 
 def test_each_answer_is_recorded_with_its_cost_and_checks(make_pipeline, handbook_pipeline, tmp_path):
@@ -168,3 +168,68 @@ def test_a_call_whose_cost_cant_be_counted_stops_the_run_and_blocks_resuming(
 
     assert run(pipeline, [ROLLBACK], budget=2.0, out=out) is None  # not counted as $0 and resumed
     assert len(sent) == 1
+
+
+def _injection_answer(case, extra=""):
+    from sourced.chunking import Chunk
+    from sourced.generation import Answer, Citation
+    from sourced.retrieval import SearchResult
+
+    source, section = case.gold[0]
+    title = live_check.INJECTION_DOCS[source].splitlines()[0].lstrip("# ")
+    body = live_check.INJECTION_DOCS[source].split("\n\n")[2].strip()
+    passage = SearchResult(Chunk("c1", source, title, section, body, 0), 1.0)
+    cite = Citation(1, source, passage.chunk.heading, [body.split(". ")[0]])
+    return Answer(f"{body.split('. ')[0]}. {case.facts[0]}.[1] {extra}", [cite], "claude"), [passage]
+
+
+@pytest.mark.parametrize(
+    "case, planted",
+    [(case, text) for case in live_check.INJECTIONS for text in case.forbidden] or [(None, None)],
+)
+def test_an_answer_that_repeats_planted_text_fails_even_with_right_facts_and_citations(case, planted):
+    assert case is not None, "the injection cases list no forbidden text"
+    assert not case.cite_every_gold
+
+    good, passages = _injection_answer(case)
+    obeyed, _ = _injection_answer(case, extra=planted)
+
+    assert live_check.checks(case, good, passages) == {
+        "citations_match_passages": True,
+        "no_forbidden_text": True,
+        "has_expected_facts": True,
+        "cites_gold": True,
+    }
+    result = live_check.checks(case, obeyed, passages)
+    assert result["no_forbidden_text"] is False
+    assert result["has_expected_facts"] and result["citations_match_passages"]  # only the planted text fails it
+
+
+@pytest.mark.parametrize("budget", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+def test_run_refuses_a_budget_that_is_not_a_finite_positive_amount(make_pipeline, handbook_pipeline, tmp_path, budget):
+    pipeline, sent = claude_pipeline(make_pipeline, handbook_pipeline)
+    out = tmp_path / "out.jsonl"
+    out.write_text(json.dumps({"id": "earlier", "cost_usd": 0.01}) + "\n")
+    before = out.read_text()
+
+    with pytest.raises(ValueError, match="budget"):
+        run(pipeline, [ROLLBACK], budget=budget, out=out)
+
+    assert sent == [] and out.read_text() == before
+
+
+@pytest.mark.parametrize("budget", ["nan", "inf", "-inf", "0", "-2"])
+def test_main_refuses_a_bad_budget_before_loading_models_or_opening_the_output(tmp_path, monkeypatch, capsys, budget):
+    import sourced.embeddings
+
+    def no_model(*args, **kwargs):
+        raise AssertionError("a model was loaded")
+
+    monkeypatch.setattr(sourced.embeddings, "FastEmbedEmbedder", no_model)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    out = tmp_path / "out.jsonl"
+
+    argv = ["--index", str(tmp_path / "x.db"), "--out", str(out), "--confirm-spend", f"--budget-usd={budget}"]
+    assert main(argv) == 2
+    assert "budget" in capsys.readouterr().err and not out.exists()

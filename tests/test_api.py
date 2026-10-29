@@ -89,3 +89,19 @@ def test_openapi_lists_the_errors_each_endpoint_can_return(handbook_pipeline):
     assert set(paths["/search"]["post"]["responses"]) == {"200", "409", "422"}
     assert set(paths["/ask"]["post"]["responses"]) == {"200", "409", "422", "502", "503"}
     assert set(paths["/health"]["get"]["responses"]) == {"200"}
+
+
+def test_blank_queries_are_rejected_before_retrieval(handbook_pipeline, monkeypatch):
+    calls = []
+    search = handbook_pipeline.search
+    monkeypatch.setattr(handbook_pipeline, "search", lambda *a, **kw: calls.append(a) or search(*a, **kw))
+
+    with client_for(handbook_pipeline) as client:
+        for blank in (" ", "\n\t ", "   \n"):
+            assert client.post("/search", json={"query": blank}).status_code == 422
+            assert client.post("/ask", json={"question": blank}).status_code == 422
+        assert calls == []
+        assert (
+            client.post("/search", json={"query": "  KR-3000  ", "mode": "bm25"}).json()[0]["source"]
+            == "error-codes.md"
+        )

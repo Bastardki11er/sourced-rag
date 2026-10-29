@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from conftest import index_state
 from sourced.pipeline import IndexBindingError
 
 
@@ -250,3 +251,114 @@ def test_a_heading_renamed_mid_query_never_lends_its_old_rerank_score(make_pipel
     assert len(calls) == 2 and results
     for r in results:
         assert r.score == len(r.chunk.indexed_text)
+
+
+# --- 4. symlinks inside the document folder ------------------------------------------
+
+
+def link_outside_file(docs, outside):
+    (docs / "payroll.md").symlink_to(outside / "payroll.md")
+
+
+def link_broken(docs, outside):
+    (docs / "gone.md").symlink_to(docs / "no-such-file.md")
+
+
+def link_directory(docs, outside):
+    (docs / "linked").symlink_to(outside, target_is_directory=True)
+
+
+def link_inside_file(docs, outside):
+    (docs / "alias.md").symlink_to(docs / "deploy.md")
+
+
+@pytest.fixture
+def outside(tmp_path):
+    folder = tmp_path / "private"
+    write(folder, "payroll.md", "Salaries", "PAYROLL-SECRET salaries are confidential.")
+    return folder
+
+
+@pytest.mark.parametrize("make_link", [link_outside_file, link_broken, link_directory, link_inside_file])
+def test_a_symlink_in_the_folder_stops_ingest_before_anything_changes(make_pipeline, docs, outside, make_link):
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+    write(docs, "deploy.md", "Rollback", "Rollback is now kctl revert.")  # would be updated
+    (docs / "laptops.md").unlink()  # would be removed
+    make_link(docs, outside)
+    before = index_state(pipeline.settings.index_path)
+
+    with pytest.raises(ValueError, match="is a symbolic link"):
+        pipeline.ingest(docs)
+
+    assert index_state(pipeline.settings.index_path) == before
+    assert "PAYROLL-SECRET" not in repr(before)
+
+
+@pytest.mark.parametrize("target", ["outside", "inside"])
+def test_a_symlinked_single_file_is_refused(make_pipeline, docs, outside, target):
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+    link = docs / "link.md"
+    link.symlink_to(outside / "payroll.md" if target == "outside" else docs / "deploy.md")
+    before = index_state(pipeline.settings.index_path)
+
+    with pytest.raises(ValueError, match="is a symbolic link"):
+        pipeline.ingest(link)
+
+    assert index_state(pipeline.settings.index_path) == before
+
+
+def test_a_symlink_on_a_new_index_writes_nothing(make_pipeline, docs, outside):
+    link_outside_file(docs, outside)
+    pipeline = make_pipeline()
+
+    with pytest.raises(ValueError, match="is a symbolic link"):
+        pipeline.ingest(docs)
+
+    with sqlite3.connect(pipeline.settings.index_path) as db:
+        assert db.execute("SELECT name FROM sqlite_master").fetchall() == []
+
+
+def test_the_folder_itself_may_be_reached_through_a_symlink(make_pipeline, docs, tmp_path):
+    alias = tmp_path / "docs-alias"
+    alias.symlink_to(docs, target_is_directory=True)
+    pipeline = make_pipeline()
+
+    assert pipeline.ingest(alias).added == ["deploy.md", "laptops.md"]
+    assert pipeline.index.root() == docs.resolve()
+
+
+@pytest.mark.parametrize("target", ["inside", "outside"])
+def test_a_single_file_reached_through_a_linked_directory_is_refused(make_pipeline, docs, outside, target):
+    write(docs, "team/oncall.md", "Pager", "The pager rotates weekly.")
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+    (docs / "shortcut").symlink_to(docs / "team" if target == "inside" else outside, target_is_directory=True)
+    linked_file = docs / "shortcut" / ("oncall.md" if target == "inside" else "payroll.md")
+    before = index_state(pipeline.settings.index_path)
+
+    with pytest.raises(ValueError, match="is a symbolic link|holds the documents of"):
+        pipeline.ingest(linked_file)
+
+    assert index_state(pipeline.settings.index_path) == before
+
+
+def test_a_single_file_under_a_linked_folder_entry_still_works(make_pipeline, docs, tmp_path):
+    alias = tmp_path / "docs-alias"
+    alias.symlink_to(docs, target_is_directory=True)
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+    write(docs, "deploy.md", "Rollback", "Rollback is now kctl revert.")
+
+    assert pipeline.ingest(alias / "deploy.md").updated == ["deploy.md"]
+
+
+def test_a_file_outside_the_folder_gets_the_folder_error_not_a_link_error(make_pipeline, docs, outside, tmp_path):
+    alias = tmp_path / "private-alias"  # a link above the file, outside the folder (like /var on macOS)
+    alias.symlink_to(outside, target_is_directory=True)
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+
+    with pytest.raises(IndexBindingError, match="holds the documents of"):
+        pipeline.ingest(alias / "payroll.md")

@@ -1,3 +1,5 @@
+import pytest
+
 from sourced.chunking import chunk_markdown
 
 DOC = """\
@@ -119,3 +121,34 @@ def test_chunk_ids_follow_everything_retrieval_reads():
     renamed_section = chunk_markdown("deploy.md", doc.replace("## Rollback", "## Undoing a release"))[0]
     renamed_title = chunk_markdown("deploy.md", doc.replace("# Deploy", "# Releases"))[0]
     assert len({chunk.id, renamed_section.id, renamed_title.id}) == 3
+
+
+def test_a_longer_fence_is_closed_only_by_a_fence_at_least_as_long():
+    md = (
+        "# Guide\n\n## Example\n\nHow to show a fence:\n\n````markdown\n```\n# not a heading\n```\n````\n\n"
+        "## Real heading\n\nAfter the example.\n"
+    )
+    chunks = chunk_markdown("guide.md", md)
+
+    assert [c.section for c in chunks] == ["Example", "Real heading"]
+    assert "# not a heading" in chunks[0].text and chunks[0].text.endswith("````")
+
+
+def test_backtick_and_tilde_fences_do_not_close_each_other():
+    tilde_outside = "# T\n\n## A\n\n~~~\n```\n# inside tildes\n```\n~~~\n\n## B\n\nText.\n"
+    backtick_outside = "# T\n\n## A\n\n```\n~~~\n# inside backticks\n~~~\n```\n\n## B\n\nText.\n"
+
+    for md in (tilde_outside, backtick_outside):
+        assert [c.section for c in chunk_markdown("x.md", md)] == ["A", "B"]
+
+
+def test_a_fence_line_with_text_after_it_does_not_close_the_block():
+    md = "# T\n\n## A\n\n```\n```python\n# still code\n```\n\n## B\n\nText.\n"
+
+    assert [c.section for c in chunk_markdown("x.md", md)] == ["A", "B"]
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, "1200", True, None])
+def test_an_invalid_chunk_size_is_refused_at_once(bad):
+    with pytest.raises(ValueError, match="max_chars"):
+        chunk_markdown("a.md", "# A\n\n## One\n\nSome text.\n", max_chars=bad)
