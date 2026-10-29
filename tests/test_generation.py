@@ -130,3 +130,67 @@ def test_extractive_answerer_quotes_the_best_passage():
 
     assert answer.text == ROLLBACK.text + " [1]"
     assert answer.citations[0].source == "deployment.md"
+
+
+def test_the_real_sdk_serializes_the_request_and_parses_a_cited_reply():
+    # The real Anthropic client over a mocked HTTP transport: checks what goes on the wire
+    # (beta header, body fields) and that a reply in the documented shape parses. It says
+    # nothing about whether the live API accepts the request; that needs a real key.
+    import json
+
+    import anthropic
+    import httpx2
+
+    sent = []
+    reply = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5-5",
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+        "content": [
+            {
+                "type": "text",
+                "text": "Run kctl rollback.",
+                "citations": [
+                    {
+                        "type": "search_result_location",
+                        "source": "deployment.md",
+                        "title": "Deploying to Production > Rolling back",
+                        "cited_text": "To roll back, run kctl rollback --to <release-id>.",
+                        "search_result_index": 0,
+                        "start_block_index": 0,
+                        "end_block_index": 0,
+                    }
+                ],
+            }
+        ],
+    }
+
+    def handler(request):
+        sent.append(request)
+        return httpx2.Response(200, json=reply)
+
+    client = anthropic.Anthropic(
+        api_key="test-key", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(handler))
+    )
+
+    answer = ClaudeAnswerer(client, "claude-opus-5-5", "medium").answer("How do I roll back?", RESULTS)
+
+    (request,) = sent
+    assert request.method == "POST" and request.url.path == "/v1/messages"
+    assert "server-side-fallback-2026-07-01" in request.headers["anthropic-beta"]
+    body = json.loads(request.content)
+    assert body["model"] == "claude-opus-5-5"
+    assert body["fallbacks"] == "default"
+    assert body["output_config"] == {"effort": "medium"}
+    assert "betas" not in body  # a header, not a body field
+    first, _, question = body["messages"][0]["content"]
+    assert first["type"] == "search_result" and first["citations"] == {"enabled": True}
+    assert question == {"type": "text", "text": "How do I roll back?"}
+    assert answer.text == "Run kctl rollback.[1]"
+    assert [(c.source, c.heading) for c in answer.citations] == [
+        ("deployment.md", "Deploying to Production > Rolling back")
+    ]

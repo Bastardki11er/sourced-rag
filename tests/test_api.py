@@ -19,6 +19,7 @@ def test_health_reports_index_size(handbook_pipeline):
         "documents": 14,
         "chunks": handbook_pipeline.index.chunk_count(),
         "answerer": "extractive",
+        "dense_search": "ok",
     }
 
 
@@ -61,3 +62,30 @@ def test_llm_outages_map_to_503(make_pipeline):
         response = client.post("/ask", json={"question": "anything"})
 
     assert response.status_code == 503
+
+
+def test_an_index_without_a_recorded_model_serves_keyword_search_and_says_why_dense_is_off(handbook_pipeline):
+    import sqlite3
+
+    with sqlite3.connect(handbook_pipeline.settings.index_path) as db:
+        db.execute("DROP TABLE meta")  # what an index built by an older version looks like
+
+    with client_for(handbook_pipeline) as client:
+        assert client.post("/search", json={"query": "KR-3000", "mode": "bm25"}).status_code == 200
+        dense = client.post("/search", json={"query": "KR-3000", "mode": "dense"})
+        ask = client.post("/ask", json={"question": "What command rolls back a release?"})
+        health = client.get("/health").json()
+
+    for response in (dense, ask):
+        assert response.status_code == 409
+        assert "SOURCED_INDEX" in response.json()["detail"]
+    assert "older version" in health["dense_search"]
+
+
+def test_openapi_lists_the_errors_each_endpoint_can_return(handbook_pipeline):
+    with client_for(handbook_pipeline) as client:
+        paths = client.get("/openapi.json").json()["paths"]
+
+    assert set(paths["/search"]["post"]["responses"]) == {"200", "409", "422"}
+    assert set(paths["/ask"]["post"]["responses"]) == {"200", "409", "422", "502", "503"}
+    assert set(paths["/health"]["get"]["responses"]) == {"200"}

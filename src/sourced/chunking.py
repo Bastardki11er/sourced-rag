@@ -13,7 +13,12 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+# Recorded in each index. Bump it whenever chunk boundaries or ids change, so an index
+# built with the old rules is rebuilt instead of mixing old and new chunks.
+CHUNKER_VERSION = "2"
+
+# Closing #s count only after whitespace, so "## Notes on C#" keeps its "#".
+_HEADING = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
@@ -68,7 +73,8 @@ def chunk_markdown(source: str, markdown: str, max_chars: int = 1200) -> list[Ch
     for section, lines in sections:
         for body in _split_long(_paragraphs(lines), max_chars):
             position = len(chunks)
-            digest = hashlib.sha1(f"{source}\0{position}\0{body}".encode()).hexdigest()[:16]
+            # Everything retrieval reads goes into the id, so a renamed heading is a new chunk.
+            digest = hashlib.sha1(f"{source}\0{position}\0{title}\0{section}\0{body}".encode()).hexdigest()[:16]
             chunks.append(Chunk(digest, source, title, section, body, position))
     return chunks
 
@@ -100,13 +106,42 @@ def _split_long(paragraphs: list[str], max_chars: int) -> list[str]:
     """
     chunks: list[str] = []
     current: list[str] = []
-    for paragraph in paragraphs:
+    for paragraph in (piece for p in paragraphs for piece in _fit(p, max_chars)):
         candidate = "\n\n".join([*current, paragraph])
         if current and len(candidate) > max_chars:
             chunks.append("\n\n".join(current))
-            current = [current[-1], paragraph] if len(current[-1]) + len(paragraph) < max_chars else [paragraph]
+            # Repeat the previous paragraph only if both fit, the blank line between them included.
+            overlap = len(current[-1]) + 2 + len(paragraph) <= max_chars
+            current = [current[-1], paragraph] if overlap else [paragraph]
         else:
             current.append(paragraph)
     if current:
         chunks.append("\n\n".join(current))
     return chunks
+
+
+_SENTENCE_END = re.compile(r"([.!?][\"')\]]*)\s")
+
+
+def _fit(paragraph: str, max_chars: int) -> list[str]:
+    """Cuts a paragraph longer than ``max_chars`` into pieces that fit.
+
+    Each cut goes after the last sentence end in the window, else at the last line
+    break, else at the last space (sentence ends and line breaks only count in the
+    second half, to avoid tiny pieces). A string with no break at all is cut at
+    ``max_chars``. Only the whitespace at a cut is dropped.
+    """
+    pieces: list[str] = []
+    rest = paragraph
+    while len(rest) > max_chars:
+        window = rest[: max_chars + 1]  # whitespace right after max_chars characters still allows a cut there
+        half = max_chars // 2
+        sentence = [m.end(1) for m in _SENTENCE_END.finditer(window) if m.end(1) > half]
+        line = [i for i, ch in enumerate(window) if ch == "\n" and i > half]
+        space = [i for i, ch in enumerate(window) if ch.isspace() and i > 0]
+        cut = (sentence or line or space or [max_chars])[-1]
+        pieces.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    if rest:
+        pieces.append(rest)
+    return pieces
