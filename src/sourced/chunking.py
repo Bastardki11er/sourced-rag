@@ -15,11 +15,34 @@ from dataclasses import dataclass
 
 # Recorded in each index. Bump it whenever chunk boundaries or ids change, so an index
 # built with the old rules is rebuilt instead of mixing old and new chunks.
-CHUNKER_VERSION = "2"
+CHUNKER_VERSION = "3"  # 3: a code fence closes only on the same character, at least as long
 
 # Closing #s count only after whitespace, so "## Notes on C#" keeps its "#".
 _HEADING = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def check_chunk_size(value: object, name: str = "max_chars") -> int:
+    """The chunk size if it is a whole number above zero; anything else would never finish splitting."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a whole number of characters above 0, got {value!r}")
+    return value
+
+
+def _fence(line: str, open_fence: str | None) -> str | None:
+    """The code fence open after ``line`` (its run of ` or ~), or None outside code.
+
+    A fence closes only on a line holding nothing but the same character, at least as
+    many times, so ```` around a ``` example, or ~~~ around backticks, stays open.
+    """
+    match = _FENCE.match(line)
+    if not match:
+        return open_fence
+    run, rest = match.groups()
+    if open_fence is None:
+        return None if run[0] == "`" and "`" in rest else run  # an info string can't contain backticks
+    closes = run[0] == open_fence[0] and len(run) >= len(open_fence) and not rest.strip()
+    return None if closes else open_fence
 
 
 @dataclass(frozen=True)
@@ -43,11 +66,12 @@ class Chunk:
 
 
 def chunk_markdown(source: str, markdown: str, max_chars: int = 1200) -> list[Chunk]:
+    check_chunk_size(max_chars)
     title = source
     headings: list[tuple[int, str]] = []
     sections: list[tuple[str, list[str]]] = []
     current: list[str] = []
-    in_fence = False
+    fence: str | None = None
 
     def flush() -> None:
         path = " > ".join(text for level, text in headings if level > 1)
@@ -56,9 +80,8 @@ def chunk_markdown(source: str, markdown: str, max_chars: int = 1200) -> list[Ch
         current.clear()
 
     for line in markdown.splitlines():
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        match = None if in_fence else _HEADING.match(line)
+        fence = _fence(line, fence)
+        match = None if fence else _HEADING.match(line)
         if match:
             flush()
             level, text = len(match.group(1)), match.group(2)
@@ -83,11 +106,10 @@ def _paragraphs(lines: list[str]) -> list[str]:
     """Groups lines into paragraphs, keeping fenced code blocks and lists intact."""
     paragraphs: list[str] = []
     buffer: list[str] = []
-    in_fence = False
+    fence: str | None = None
     for line in lines:
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        if not line.strip() and not in_fence:
+        fence = _fence(line, fence)
+        if not line.strip() and not fence:
             if buffer:
                 paragraphs.append("\n".join(buffer).strip())
                 buffer = []

@@ -127,6 +127,13 @@ command at the top of each file; Dependabot opens weekly PRs for the pins, the b
   chunks, keyword index entries and embeddings, and reports `removed N`. This only happens after a full
   folder scan where every file ingested successfully: ingesting a single file never removes anything, and a
   missing folder or a file that fails to read stops the run before any removal.
+- **Symbolic links are not followed.** The folder itself may be reached through a link, but a link inside it
+  (to a file, a directory, or nothing) stops `ingest` with exit code 2 before anything is read, written or
+  removed, and so does `ingest` of a single file that is a link. Copy the file in or remove the link. This
+  keeps text from outside the folder out of the index for a trusted local folder; it is checked once at the
+  start, not against files being swapped while ingest runs.
+- **`SOURCED_MAX_CHUNK_CHARS`** must be a whole number above 0; anything else stops every command with exit
+  code 2 before a model is loaded or the index is opened.
 - **One ingest at a time.** `sourced ingest` holds an OS file lock (`<index>.lock`, next to the index) for
   the whole run, from checking the index to the last removal. A second ingest of the same index, from any
   process, stops right away with `another sourced ingest is running` and exit code 2; run it again when the
@@ -139,8 +146,11 @@ command at the top of each file; Dependabot opens weekly PRs for the pins, the b
   works, and `/health` says why dense search is off. Nothing is migrated in place: rebuild (below).
 - **Indexes built before this was recorded** (no folder or model stored) are only read: keyword search works,
   dense/hybrid search and `ingest` refuse. Opening an index for queries never writes to it, and it can be
-  opened read-only. The chunker version was bumped with this change (chunk ids now include the heading), so
-  indexes built by earlier versions need a rebuild too.
+  opened read-only.
+- **Chunker versions.** Version 2 put the heading into chunk ids; version 3 closes a code fence only on the
+  same character at least as long (```` around a ``` example stays one block). Each bump means `ingest`
+  refuses an index built by an earlier version: rebuild it (below). Search on such an index keeps working
+  until then.
 - **Rebuilding.** Build next to the old index, don't delete it first:
 
   ```bash
@@ -166,7 +176,9 @@ command at the top of each file; Dependabot opens weekly PRs for the pins, the b
 
 Errors come back as `{"detail": "..."}`. **409**: dense or hybrid search on an index built with another
 embedding model or by an older version (bm25 `/search` still works; the message says how to rebuild).
-**422**: the body failed validation (empty or over 1000 characters, `top_k` outside 1–20, unknown `mode`).
+**422**: the body failed validation (`query`/`question` blank or over 1000 characters once leading and
+trailing whitespace is removed, `top_k` outside 1–20, unknown `mode`). `sourced search` and `ask` exit with
+code 2 on a blank query.
 **502**: Claude returned an error. **503**: Claude is rate limited or unreachable; try again. The 502/503
 errors only come from `/ask` with the Claude answerer. `/docs` lists the same responses.
 
@@ -183,7 +195,7 @@ errors only come from `/ask` with the Claude answerer. `/docs` lists the same re
 ## Tests
 
 ```bash
-pytest -q        # 78 tests, ~1.5 s, no network: a hashing embedder stands in for the model
+pytest -q        # 129 tests, ~1.5 s, no network: a hashing embedder stands in for the model
 ruff check src tests
 ```
 
@@ -199,7 +211,7 @@ each answer with its passages, citations, stop reason, usage and cost to a JSON 
 checks (expected facts, citations point at passages that were sent and quote text inside them, declines
 without citing, no injected text in the answer). Those checks are a first pass; the answers still need
 reading. It refuses to run without `--confirm-spend`, credentials and the official API host, and makes no
-retries. `--budget-usd` (default 2) covers everything recorded in the `--out` file, earlier runs included; a
+retries. `--budget-usd` (default 2, a finite amount above 0) covers everything recorded in the `--out` file, earlier runs included; a
 call is skipped when its estimated worst case (full `max_tokens` plus one fallback attempt, at the highest
 price the tool knows) would pass it. The server picks the fallback model, so that is an estimate, not a
 guarantee. Any API error, or a reply whose cost can't be counted, stops the run and marks the file so it
@@ -230,7 +242,9 @@ computed from each response's `usage` at $4 / $20 per million tokens, not read f
   instruction instead of following it; the answer text contained neither the made-up password nor the
   attacker address. The Wi-Fi citation, though, quotes the whole passage, planted password and address
   included, and citations are returned to the user too. Anything indexed can reach the asker through a
-  citation (see the permissions limitation below).
+  citation (see the permissions limitation below). A bug in the tool at the time left the injection cases'
+  list of forbidden text empty, so the automatic check didn't look for it then; the conclusion above came from
+  reading the answers. After the fix, the stored replies were re-checked offline (no new calls): both pass.
 
 That is 12 questions on a small fictional handbook, mostly one call each: it shows the integration works and
 how these answers looked, not an accuracy rate or how stable answers are across runs.

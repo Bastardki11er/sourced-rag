@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sourced.retrieval import reciprocal_rank_fusion
 from sourced.store import to_fts_query
 
@@ -83,3 +85,9 @@ def test_bm25_finds_accented_words(make_pipeline, tmp_path):
 
     assert pipeline.search("café hours", top_k=1, mode="bm25")[0].chunk.source == "office.md"
     assert pipeline.search("résumé", top_k=1, mode="bm25")[0].chunk.source == "hr.md"
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+def test_a_blank_query_is_refused(handbook_pipeline, blank):
+    with pytest.raises(ValueError, match="empty"):
+        handbook_pipeline.search(blank)

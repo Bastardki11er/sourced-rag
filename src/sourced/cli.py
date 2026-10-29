@@ -14,7 +14,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from .config import Settings
+from .config import ConfigError, Settings
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,7 +54,11 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
 
     args = parser.parse_args(argv)
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ConfigError as error:  # before any model is loaded or file opened
+        print(f"sourced: error: {error}", file=sys.stderr)
+        return 2
 
     if args.command == "serve":
         import uvicorn
@@ -70,11 +74,19 @@ def main(argv: list[str] | None = None) -> int:
         wants_rerank = settings.rerank if wants_rerank is None else wants_rerank
     pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
 
-    from .pipeline import IndexBindingError, IndexBusyError, IndexConfigError
+    from .pipeline import DocumentLinkError, IndexBindingError, IndexBusyError, IndexConfigError
+    from .retrieval import EmptyQueryError
 
     try:
         return _run(args, settings, pipeline)
-    except (IndexBindingError, IndexBusyError, IndexConfigError, FileNotFoundError) as error:
+    except (
+        IndexBindingError,
+        IndexBusyError,
+        IndexConfigError,
+        DocumentLinkError,
+        EmptyQueryError,
+        FileNotFoundError,
+    ) as error:
         print(f"sourced: error: {error}", file=sys.stderr)
         return 2
 

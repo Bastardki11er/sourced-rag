@@ -6,27 +6,30 @@ uvicorn sourced.api:app            # or: sourced serve
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Annotated, Literal
 
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from .config import Settings
 from .pipeline import IndexConfigError, Pipeline, build_pipeline
 from .retrieval import SearchResult
 
+# Leading and trailing whitespace is dropped before the length check, so a blank query is a 422.
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=1000)
+    query: Text
     top_k: int = Field(default=5, ge=1, le=20)
     mode: Literal["bm25", "dense", "hybrid"] = "hybrid"
     rerank: bool = False
 
 
 class AskRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=1000)
+    question: Text
     top_k: int = Field(default=5, ge=1, le=20)
     rerank: bool | None = None  # None: use the server default (SOURCED_RERANK)
 
