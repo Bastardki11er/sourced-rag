@@ -65,3 +65,21 @@ def test_reingesting_unchanged_files_is_a_no_op(make_pipeline, tmp_path):
     assert third.updated == ["a.md"]
     assert third.chunks == 2  # old chunks were replaced, not duplicated
     assert "Second version." in pipeline.search("version", top_k=1, mode="bm25")[0].chunk.text
+
+
+def test_fts_query_keeps_accented_words_whole():
+    assert to_fts_query("café résumé naïve") == '"café" OR "résumé" OR "naïve"'
+    # The same words typed as base letter + combining accent come out identical.
+    assert to_fts_query("café naïve") == '"café" OR "naïve"'
+
+
+def test_bm25_finds_accented_words(make_pipeline, tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "office.md").write_text("# Office\n\n## Café\n\nThe café on floor 2 opens at 8.\n")
+    (docs / "hr.md").write_text("# HR\n\n## Hiring\n\nEvery résumé gets two reviewers.\n")
+    pipeline = make_pipeline()
+    pipeline.ingest(docs)
+
+    assert pipeline.search("café hours", top_k=1, mode="bm25")[0].chunk.source == "office.md"
+    assert pipeline.search("résumé", top_k=1, mode="bm25")[0].chunk.source == "hr.md"

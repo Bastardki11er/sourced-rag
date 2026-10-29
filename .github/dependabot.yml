@@ -1,0 +1,24 @@
+# Weekly PRs for newer dependencies; each one has to pass CI before it's merged.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    # Move the exact pins in requirements*.txt (what CI and the image install), but leave
+    # the ">=" ranges in pyproject.toml alone unless a new version falls outside them.
+    versioning-strategy: increase-if-necessary
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: docker # the python base image
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups: # one PR for all actions instead of one each
+      actions:
+        patterns: ["*"]

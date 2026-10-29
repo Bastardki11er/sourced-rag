@@ -14,6 +14,11 @@ import numpy as np
 
 
 class Embedder(Protocol):
+    # Identify the vector space: an index only accepts vectors (and queries) from the
+    # model that built it. Taken from the loaded model, not from the settings.
+    model_id: str
+    dimensions: int
+
     def embed_documents(self, texts: list[str]) -> np.ndarray: ...
 
     def embed_query(self, text: str) -> np.ndarray: ...
@@ -29,6 +34,8 @@ class FastEmbedEmbedder:
         from fastembed import TextEmbedding  # heavy import, only when actually used
 
         self._model = TextEmbedding(model_name)
+        self.model_id = f"fastembed:{self._model.model_name}"
+        self.dimensions = self._model.embedding_size
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
         return _normalize(np.array(list(self._model.passage_embed(texts)), dtype=np.float32))
@@ -44,6 +51,10 @@ class HashingEmbedder:
 
     def __init__(self, dimensions: int = 256) -> None:
         self.dimensions = dimensions
+
+    @property
+    def model_id(self) -> str:
+        return f"hashing-md5:{self.dimensions}"
 
     def _vector(self, text: str) -> np.ndarray:
         vector = np.zeros(self.dimensions, dtype=np.float32)
