@@ -13,6 +13,15 @@ class ConfigError(ValueError):
     """A setting has a value the service can't run with."""
 
 
+MAX_TOP_K = 20
+
+
+def check_top_k(value: int, name: str = "top_k") -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_TOP_K:
+        raise ConfigError(f"{name} must be an integer between 1 and {MAX_TOP_K}, got {value!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     index_path: Path = Path(".sourced/index.db")
@@ -29,6 +38,11 @@ class Settings:
     top_k: int = 5
 
     def __post_init__(self) -> None:
+        check_top_k(self.top_k)
+        if self.answerer not in ("claude", "extractive"):
+            raise ConfigError("SOURCED_ANSWERER (answerer) must be 'claude' or 'extractive'")
+        if not isinstance(self.rerank, bool):
+            raise ConfigError("SOURCED_RERANK (rerank) must be a boolean")
         try:
             check_chunk_size(self.max_chunk_chars, "max_chunk_chars")
         except ValueError as exc:
@@ -45,9 +59,9 @@ class Settings:
             claude_model=env.get("SOURCED_CLAUDE_MODEL", cls.claude_model),
             claude_effort=env.get("SOURCED_CLAUDE_EFFORT", cls.claude_effort),
             answerer=env.get("SOURCED_ANSWERER", "claude" if has_key else "extractive"),
-            rerank=env.get("SOURCED_RERANK", "true").lower() in ("1", "true", "yes"),
+            rerank=_rerank(env.get("SOURCED_RERANK", "true")),
             max_chunk_chars=_chunk_chars(env.get("SOURCED_MAX_CHUNK_CHARS")),
-            top_k=int(env.get("SOURCED_TOP_K", cls.top_k)),
+            top_k=_top_k(env.get("SOURCED_TOP_K", str(cls.top_k))),
         )
 
 
@@ -60,3 +74,19 @@ def _chunk_chars(raw: str | None) -> int:
         raise ConfigError(
             f"SOURCED_MAX_CHUNK_CHARS must be a whole number of characters above 0, got {raw!r}"
         ) from None
+
+
+def _top_k(raw: str) -> int:
+    try:
+        return check_top_k(int(raw.strip()), "SOURCED_TOP_K")
+    except ValueError:
+        raise ConfigError(f"SOURCED_TOP_K must be an integer between 1 and {MAX_TOP_K}, got {raw!r}") from None
+
+
+def _rerank(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes"):
+        return True
+    if value in ("0", "false", "no"):
+        return False
+    raise ConfigError(f"SOURCED_RERANK must be true/false, yes/no or 1/0, got {raw!r}")

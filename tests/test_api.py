@@ -19,6 +19,7 @@ def test_health_reports_index_size(handbook_pipeline):
         "documents": 14,
         "chunks": handbook_pipeline.index.chunk_count(),
         "answerer": "extractive",
+        "reranking": "disabled",
         "dense_search": "ok",
     }
 
