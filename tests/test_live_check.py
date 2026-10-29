@@ -233,3 +233,84 @@ def test_main_refuses_a_bad_budget_before_loading_models_or_opening_the_output(t
     argv = ["--index", str(tmp_path / "x.db"), "--out", str(out), "--confirm-spend", f"--budget-usd={budget}"]
     assert main(argv) == 2
     assert "budget" in capsys.readouterr().err and not out.exists()
+
+
+@pytest.mark.parametrize("stop, content", [("max_tokens", "unfinished"), ("end_turn", " ")])
+def test_incomplete_generation_is_billed_recorded_and_stops_without_retry(
+    make_pipeline, handbook_pipeline, tmp_path, stop, content
+):
+    from sourced.generation import GenerationError
+
+    pipeline, sent = claude_pipeline(make_pipeline, handbook_pipeline)
+    messages = pipeline.answerer.client.beta.messages
+    create = messages.create
+
+    def incomplete(**kwargs):
+        response = create(**kwargs)
+        response.stop_reason = stop
+        response.content[0].text = content
+        return response
+
+    messages.create = incomplete
+    out = tmp_path / "out.jsonl"
+    with pytest.raises(GenerationError):
+        run(pipeline, [ROLLBACK, ROLLBACK], budget=2.0, out=out)
+
+    record = json.loads(out.read_text())
+    assert len(sent) == 1
+    assert record["stop_reason"] == stop
+    assert record["error"]["type"] == "GenerationError"
+    assert "answer" not in record and "checks" not in record
+    assert record["cost_usd"] == pytest.approx(0.008)
+    assert live_check.spent_so_far(out) == pytest.approx(0.008)
+    # A later invocation cannot forget the charged failed attempt.
+    run(pipeline, [ROLLBACK], budget=0.008, out=out)
+    assert len(sent) == 1
+
+
+def test_main_stops_cleanly_after_charged_incomplete_generation(
+    make_pipeline, handbook_pipeline, tmp_path, monkeypatch, capsys
+):
+    import sourced.embeddings
+
+    pipeline, sent = claude_pipeline(make_pipeline, handbook_pipeline)
+    sdk = pipeline.answerer.client
+    create = sdk.beta.messages.create
+
+    def incomplete(**kwargs):
+        response = create(**kwargs)
+        response.stop_reason = "max_tokens"
+        return response
+
+    sdk.beta.messages.create = incomplete
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: sdk)
+    monkeypatch.setattr(sourced.embeddings, "FastEmbedEmbedder", lambda *a: pipeline.embedder)
+    monkeypatch.setenv("SOURCED_RERANK", "false")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    out = tmp_path / "out.jsonl"
+    assert (
+        main(["--index", str(pipeline.settings.index_path), "--out", str(out), "--confirm-spend", "--only", "l02"]) == 1
+    )
+    assert len(sent) == 1
+    assert "stopped:" in capsys.readouterr().out
+    assert json.loads(out.read_text())["cost_usd"] == pytest.approx(0.008)
+
+
+def test_incomplete_generation_with_missing_usage_blocks_resuming(make_pipeline, handbook_pipeline, tmp_path):
+    pipeline, sent = claude_pipeline(make_pipeline, handbook_pipeline)
+    messages = pipeline.answerer.client.beta.messages
+    create = messages.create
+
+    def incomplete(**kwargs):
+        response = create(**kwargs)
+        response.stop_reason = "max_tokens"
+        response.usage = None
+        return response
+
+    messages.create = incomplete
+    out = tmp_path / "out.jsonl"
+    assert run(pipeline, [ROLLBACK, ROLLBACK], budget=2.0, out=out) is None
+    assert json.loads(out.read_text())["cost_unknown"] is True
+    assert run(pipeline, [ROLLBACK], budget=2.0, out=out) is None
+    assert len(sent) == 1

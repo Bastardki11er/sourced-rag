@@ -14,7 +14,14 @@ import sys
 import textwrap
 from pathlib import Path
 
-from .config import ConfigError, Settings
+from .config import ConfigError, Settings, check_top_k
+
+
+def _top_k(raw: str) -> int:
+    try:
+        return check_top_k(int(raw), "--top-k")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--top-k must be an integer between 1 and 20, got {raw!r}") from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     search = commands.add_parser("search", help="show the passages retrieval finds, without an LLM")
     search.add_argument("query")
     search.add_argument("--mode", choices=["bm25", "dense", "hybrid"], default="hybrid")
-    search.add_argument("--top-k", type=int, default=5)
+    search.add_argument("--top-k", type=_top_k, default=None)
     search.add_argument("--rerank", action="store_true")
 
     ask = commands.add_parser("ask", help="answer a question with citations")
@@ -41,7 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     evaluate = commands.add_parser("eval", help="score retrieval (and optionally answers) on a labelled set")
     evaluate.add_argument("questions", type=Path)
     evaluate.add_argument("--rerank", action="store_true", help="also score hybrid retrieval + cross-encoder")
-    evaluate.add_argument("--answers", action="store_true", help="also score generated answers (calls the LLM)")
+    evaluate.add_argument(
+        "--answers",
+        action="store_true",
+        help="also score generated answers (calls the LLM); reranked only with --rerank",
+    )
     evaluate.add_argument(
         "--fail-under",
         type=float,
@@ -74,8 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         wants_rerank = settings.rerank if wants_rerank is None else wants_rerank
     pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
 
+    from .generation import GenerationError
     from .pipeline import DocumentLinkError, IndexBindingError, IndexBusyError, IndexConfigError
-    from .retrieval import EmptyQueryError
+    from .retrieval import EmptyQueryError, RerankUnavailableError
 
     try:
         return _run(args, settings, pipeline)
@@ -85,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         IndexConfigError,
         DocumentLinkError,
         EmptyQueryError,
+        RerankUnavailableError,
+        GenerationError,
         FileNotFoundError,
     ) as error:
         print(f"sourced: error: {error}", file=sys.stderr)
@@ -125,7 +139,7 @@ def _run(args: argparse.Namespace, settings: Settings, pipeline) -> int:
         print(report)
         if args.answers:
             print()
-            print(answer_report(pipeline, questions))
+            print(answer_report(pipeline, questions, rerank=args.rerank))  # the reranker loaded for this command
         if args.fail_under is not None:
             hit5 = scores["hybrid", args.rerank].hits[5]  # the row the table shows, not a second run
             if hit5 < args.fail_under:

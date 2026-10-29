@@ -85,7 +85,7 @@ CI re-runs this evaluation on every push and **fails the build if hit@5 drops be
 | Incremental ingestion by content hash | Re-running `ingest` only re-embeds changed files. A document's chunks are swapped in one transaction |
 | One index per folder | Documents are named by their path inside the folder, so mixing folders in one index would let `team-a/README.md` overwrite `team-b/README.md`. Binding the index to one folder also makes it safe to delete what that folder no longer has |
 | FTS5 queries built from quoted terms joined with `OR` | User text like `KR-4021` or `NEAR` can't be parsed as FTS5 syntax, and one rare matching term is enough to surface a chunk |
-| `extractive` answerer when no API key is set | The service and its evals still run in CI and for anyone cloning the repo. It returns the top-ranked passage verbatim with one citation (plus the retrieved passages); it does not write a combined answer |
+| `extractive` answerer when no API key is set | The service and its evals still run in CI and for anyone cloning the repo. It returns the top-ranked passage verbatim with one citation (plus the retrieved passages); it does not write a combined answer or check whether the passage answers the question |
 
 ## Quickstart
 
@@ -172,14 +172,19 @@ command at the top of each file; Dependabot opens weekly PRs for the pins, the b
 |---|---|---|---|---|
 | `POST` | `/ask` | `{"question": "...", "top_k": 5}` | `answer` with `[n]` markers, `citations` (source, heading, quoted text), retrieved `passages`, `timings_ms` | 409, 422, 502, 503 |
 | `POST` | `/search` | `{"query": "...", "mode": "hybrid", "rerank": false}` | Ranked passages, with where each retriever ranked them | 409, 422 |
-| `GET` | `/health` | | Document and chunk counts, active answerer, `dense_search`: `"ok"` or why dense/hybrid search is refused | |
+| `GET` | `/health` | | Document and chunk counts, active answerer, `reranking` (`"ok"` or `"disabled"`), `dense_search`: `"ok"` or why dense/hybrid search is refused | |
 
 Errors come back as `{"detail": "..."}`. **409**: dense or hybrid search on an index built with another
 embedding model or by an older version (bm25 `/search` still works; the message says how to rebuild).
+409 also means `rerank: true` was requested but this server has no reranker loaded; send `rerank: false`,
+or enable `SOURCED_RERANK` and restart. Requests never silently skip requested reranking.
 **422**: the body failed validation (`query`/`question` blank or over 1000 characters once leading and
-trailing whitespace is removed, `top_k` outside 1–20, unknown `mode`). `sourced search` and `ask` exit with
-code 2 on a blank query.
-**502**: Claude returned an error. **503**: Claude is rate limited or unreachable; try again. The 502/503
+trailing whitespace is removed, `top_k` that is not an integer from 1–20 (including booleans), unknown `mode`). `sourced search` and `ask` exit with
+code 2 on a blank query. CLI `--top-k`, Python search/ask and `SOURCED_TOP_K` also require an integer
+from 1–20. Omitting CLI `--top-k` uses `SOURCED_TOP_K` (default 5); an explicit value overrides it.
+**502**: Claude returned an error, stopped before finishing (including `max_tokens`), or returned no
+nonblank answer text. Partial text is not returned as an answer, and no automatic generation retry is
+made for these responses. The CLI exits with code 2 for an incomplete or empty answer. **503**: Claude is rate limited or unreachable; try again. The 502/503
 errors only come from `/ask` with the Claude answerer. `/docs` lists the same responses.
 
 ### Configuration
@@ -188,20 +193,35 @@ errors only come from `/ask` with the Claude answerer. `/docs` lists the same re
 |---|---|
 | `SOURCED_CLAUDE_MODEL` | `claude-opus-5-5` |
 | `SOURCED_CLAUDE_EFFORT` | `medium` |
-| `SOURCED_RERANK` | `true` |
+| `SOURCED_RERANK` | `true`: load the server reranker and rerank `/ask` by default; `false` disables both |
 | `SOURCED_INDEX` | `.sourced/index.db` |
-| `SOURCED_ANSWERER` | `claude` if `ANTHROPIC_API_KEY` is set, otherwise `extractive` |
+| `SOURCED_ANSWERER` | `claude` if `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, otherwise `extractive`; only these two values are accepted |
+| `SOURCED_TOP_K` | `5` for CLI/Python calls that omit `top_k`; API request default remains `5` |
+
+`SOURCED_RERANK` accepts `true`/`false`, `yes`/`no`, or `1`/`0` (case insensitive).
+Invalid values stop startup before models are loaded. CLI `search --rerank` and `eval --rerank`
+explicitly load their reranker even when the server default is disabled; `eval --answers` reranks only with `--rerank`.
+
+In extractive mode, `/ask` returns a retrieved passage rather than a generated answer. The `answerer`
+field identifies this mode. A passage and its citation do not prove the question is answerable; even
+an unrelated question can return a passage with `refused: false`. Use Claude mode for generated
+answers with the prompt's abstention behavior. The bundled embedding and reranking models target
+English; retrieval quality for Chinese or other languages has not been established.
 
 ## Tests
 
 ```bash
-pytest -q        # 129 tests, ~1.5 s, no network: a hashing embedder stands in for the model
+pytest -q        # 180 tests, ~2 s, no network: a hashing embedder stands in for the model
 ruff check src tests
 ```
 
-The tests cover heading-aware chunking (code fences, overlap, splitting paragraphs longer than a chunk, headings like `C#`), FTS5 query sanitizing (including accented words), RRF math, reranking, idempotent re-ingestion, keeping the index in step with the folder (another process re-indexing, deleted files, one folder per index, old indexes), one ingest at a time across processes (lock contention, release on failure and on a killed process), refusing an index built with another model, vector size or chunking, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, API validation and error mapping, the eval command, and a BM25 regression floor on the real handbook.
+The tests cover heading-aware chunking (code fences, overlap, splitting paragraphs longer than a chunk, headings like `C#`), FTS5 query sanitizing (including accented words), RRF math, reranking, idempotent re-ingestion, keeping the index in step with the folder (another process re-indexing, deleted files, one folder per index, old indexes), one ingest at a time across processes (lock contention, release on failure and on a killed process), refusing an index built with another model, vector size or chunking, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, incomplete/empty generation failures and their cost accounting, reranker availability, CLI/Python/API top-k validation, API validation and error mapping, the eval command, and a BM25 regression floor on the real handbook.
 
 One test builds the request with the real `anthropic` SDK over a mocked HTTP transport, so it checks the beta header and the serialized body the SDK actually sends, and that a cited reply parses. It does not show that the live API accepts the request; only a call with a real key does that.
+
+The live check stops on incomplete or empty generation too. When the response includes usable usage,
+it records that attempt's cost before stopping with a nonzero exit; later runs count that cost.
+If usage cannot be priced, the existing unknown-cost guard blocks resuming that output file.
 
 **Live check against the real API (opt-in, paid).** `python -m sourced.live_check` asks Claude 12 questions:
 9 from `eval/questions.jsonl` (exact facts, an error code, a command, paraphrases, a question with two

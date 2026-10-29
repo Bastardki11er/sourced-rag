@@ -45,6 +45,10 @@ class Answer:
     refused: bool = False
 
 
+class GenerationError(RuntimeError):
+    """Claude returned no complete answer; callers must not present partial text as success."""
+
+
 class Answerer(Protocol):
     name: str
 
@@ -87,6 +91,11 @@ class ClaudeAnswerer:
 
         if response.stop_reason == "refusal":
             return Answer("The model declined to answer this question.", [], self.name, refused=True)
+        if response.stop_reason != "end_turn":
+            raise GenerationError("The language model did not finish its answer; no answer was returned")
+        # Check text before adding citation markers: markers alone are not an answer.
+        if not any(block.type == "text" and block.text.strip() for block in response.content):
+            raise GenerationError("The language model returned an empty answer")
         return _with_citation_markers(response.content, self.name)
 
 
