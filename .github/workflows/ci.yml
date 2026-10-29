@@ -10,12 +10,13 @@ jobs:
     name: Lint + unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -e ".[dev]"
+      # Same install as local dev: exact pins first, then the package itself without resolving again.
+      - run: pip install -r requirements-dev.txt && pip install --no-deps -e . && pip check
       - run: ruff check src tests
       - run: ruff format --check src tests
       - run: pytest -q
@@ -27,16 +28,16 @@ jobs:
     env:
       FASTEMBED_CACHE_PATH: /home/runner/.cache/fastembed
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
           cache: pip
-      - uses: actions/cache@v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /home/runner/.cache/fastembed
           key: fastembed-bge-small-en-v1.5-minilm-l6
-      - run: pip install -e .
+      - run: pip install -r requirements.txt && pip install --no-deps -e . && pip check
       - run: sourced ingest data/handbook
       - name: Evaluate retrieval and fail if hit@5 drops below 0.95
         shell: bash  # explicit bash enables pipefail, so the gate's exit code survives the tee
@@ -49,7 +50,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t sourced .
       - run: docker run -d --name sourced -p 8000:8000 sourced
       - name: Wait for the API and ask a question
