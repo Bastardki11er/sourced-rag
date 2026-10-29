@@ -7,9 +7,11 @@ Ask questions about your documentation and get answers **with citations you can 
 
 Sourced is a retrieval-augmented generation (RAG) service. It indexes Markdown docs, finds
 the right passages with **hybrid search** (BM25 + embeddings + a cross-encoder reranker),
-and has Claude answer **only from those passages**. Every claim comes back with the exact
-sentence it was based on. Retrieval quality is measured on a labelled question set, and CI
-fails if it regresses.
+and has Claude answer **only from those passages**. Each cited claim comes back with the
+source sentence it points to, so a reader can check it; the quote shows where a claim came
+from, not that the claim is right. Without Claude credentials, an `extractive` mode returns
+the best passage verbatim instead. Retrieval quality is measured on a labelled question set,
+and CI fails if it regresses.
 
 **Stack:** Python 3.13 · FastAPI · Claude API (search-result citations) · SQLite FTS5 (BM25) · fastembed / ONNX (`bge-small-en-v1.5`, MiniLM cross-encoder) · NumPy · pytest · Ruff · Docker · GitHub Actions
 
@@ -70,7 +72,7 @@ Retrieval latency on an Apple M5 laptop (CPU only, 87 chunks, p50 / p95 over the
 
 Reranking costs ~110 ms, which is small next to LLM generation, so `/ask` reranks by default and `/search` doesn't.
 
-CI re-runs this evaluation on every push and **fails the build if hit@5 drops below 0.95**, so a chunking or retrieval change can't silently make answers worse.
+CI re-runs this evaluation on every push and **fails the build if hit@5 drops below 0.95**, so a chunking or retrieval change can't silently make retrieval worse. This is a retrieval check only: it says the right passage reaches the answerer, not that the answer is right.
 
 ## Design decisions
 
@@ -81,18 +83,19 @@ CI re-runs this evaluation on every push and **fails the build if hit@5 drops be
 | SQLite for everything (FTS5 + vectors) | One file, zero infrastructure, transactional re-indexing. Brute-force cosine over a NumPy matrix takes ~2 ms here. Past a few hundred thousand chunks I'd move to an ANN index (pgvector/HNSW) |
 | Local ONNX embedding and reranking models | No per-query embedding cost or third-party data sharing, deterministic for evals, and the Docker image runs offline |
 | Incremental ingestion by content hash | Re-running `ingest` only re-embeds changed files. A document's chunks are swapped in one transaction |
+| One index per folder | Documents are named by their path inside the folder, so mixing folders in one index would let `team-a/README.md` overwrite `team-b/README.md`. Binding the index to one folder also makes it safe to delete what that folder no longer has |
 | FTS5 queries built from quoted terms joined with `OR` | User text like `KR-4021` or `NEAR` can't be parsed as FTS5 syntax, and one rare matching term is enough to surface a chunk |
-| `extractive` answerer when no API key is set | The service and its evals still run in CI and for anyone cloning the repo |
+| `extractive` answerer when no API key is set | The service and its evals still run in CI and for anyone cloning the repo. It returns the top-ranked passage verbatim with one citation (plus the retrieved passages); it does not write a combined answer |
 
 ## Quickstart
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements-dev.txt && pip install --no-deps -e .   # exact pins, the same install CI uses
 
 sourced ingest data/handbook            # index the sample handbook (or your own docs)
 sourced search "how do I roll back?"    # retrieval only, no LLM
-export ANTHROPIC_API_KEY=...            # optional: without it, answers are extractive
+export ANTHROPIC_API_KEY=...            # optional: without it, ask returns the best passage verbatim
 sourced ask "Who do I tell if my laptop is stolen?"
 sourced serve                           # HTTP API on :8000, docs at /docs
 ```
@@ -100,16 +103,72 @@ sourced serve                           # HTTP API on :8000, docs at /docs
 Or with Docker (models and the sample index are baked into the image):
 
 ```bash
-docker build -t sourced . && docker run -p 8000:8000 -e ANTHROPIC_API_KEY sourced
+docker build -t sourced . && docker run -p 127.0.0.1:8000:8000 -e ANTHROPIC_API_KEY sourced
 ```
+
+The service has no authentication, so it is meant for your own machine or a trusted internal network
+(`sourced serve` listens on 127.0.0.1, and the example above publishes the port on localhost only). Serving it
+to anyone else needs authentication, access control and limits on Claude spending first.
+
+`requirements.txt` (runtime) and `requirements-dev.txt` (runtime + test tools) pin every package to an exact
+version; CI and the Docker image install from them, then add the package with `--no-deps`. `pyproject.toml`
+keeps the looser ranges. To move the pins, edit `pyproject.toml` if needed and rerun the `uv pip compile`
+command at the top of each file; Dependabot opens weekly PRs for the pins, the base image and the CI actions
+(which are pinned to commit SHAs).
+
+### Indexing your own documents
+
+- **One folder per index.** The first `sourced ingest <folder>` binds the index to that folder (its resolved
+  absolute path). Ingesting a different folder is refused before anything changes; give it its own index with
+  `SOURCED_INDEX=other.db sourced ingest <other-folder>`.
+- **Single files** (`sourced ingest docs/team/oncall.md`) must live inside the bound folder and keep their
+  folder-relative name (`team/oncall.md`). On a new index, a single file binds its parent folder.
+- **Deleted files.** Ingesting the whole folder removes documents whose file is gone, together with their
+  chunks, keyword index entries and embeddings, and reports `removed N`. This only happens after a full
+  folder scan where every file ingested successfully: ingesting a single file never removes anything, and a
+  missing folder or a file that fails to read stops the run before any removal.
+- **One ingest at a time.** `sourced ingest` holds an OS file lock (`<index>.lock`, next to the index) for
+  the whole run, from checking the index to the last removal. A second ingest of the same index, from any
+  process, stops right away with `another sourced ingest is running` and exit code 2; run it again when the
+  first one has finished. The lock is released when ingest ends, fails or its process dies. The lock file
+  stays in place on purpose. Ingest needs `fcntl` locks, so it runs on Linux and macOS, not on Windows.
+- **An index is tied to the model and chunking that built it.** The first ingest records the embedding model
+  (as reported by the loaded model), its vector dimensions, `SOURCED_MAX_CHUNK_CHARS` and the chunker version.
+  Changing any of them makes `ingest` refuse before it touches anything, and makes dense and hybrid search
+  refuse (HTTP 409) instead of comparing vectors from different models; keyword search (`mode=bm25`) still
+  works, and `/health` says why dense search is off. Nothing is migrated in place: rebuild (below).
+- **Indexes built before this was recorded** (no folder or model stored) are only read: keyword search works,
+  dense/hybrid search and `ingest` refuse. Opening an index for queries never writes to it, and it can be
+  opened read-only. The chunker version was bumped with this change (chunk ids now include the heading), so
+  indexes built by earlier versions need a rebuild too.
+- **Rebuilding.** Build next to the old index, don't delete it first:
+
+  ```bash
+  SOURCED_INDEX=.sourced/index-new.db sourced ingest data/handbook   # must exit 0
+  SOURCED_INDEX=.sourced/index-new.db sourced search "how do I roll back?"
+  cp .sourced/index.db .sourced/index-backup.db                      # keep the old one
+  export SOURCED_INDEX=.sourced/index-new.db                         # then restart sourced serve
+  ```
+
+  A failed ingest can leave a partly built index that still answers searches, so only an ingest that
+  exits 0 means the rebuild is complete; rerun it until it does. A running server keeps reading the file it
+  opened, even if another file is moved to that path, until it is restarted.
+- A running server notices changes another process commits to the index (for example a `sourced ingest`
+  while `sourced serve` runs) on its next query.
 
 ### API
 
-| Method | Path | Body | Returns |
-|---|---|---|---|
-| `POST` | `/ask` | `{"question": "...", "top_k": 5}` | `answer` with `[n]` markers, `citations` (source, heading, quoted text), retrieved `passages`, `timings_ms` |
-| `POST` | `/search` | `{"query": "...", "mode": "hybrid", "rerank": false}` | Ranked passages, with where each retriever ranked them |
-| `GET` | `/health` | | Document and chunk counts, active answerer |
+| Method | Path | Body | Returns | Errors |
+|---|---|---|---|---|
+| `POST` | `/ask` | `{"question": "...", "top_k": 5}` | `answer` with `[n]` markers, `citations` (source, heading, quoted text), retrieved `passages`, `timings_ms` | 409, 422, 502, 503 |
+| `POST` | `/search` | `{"query": "...", "mode": "hybrid", "rerank": false}` | Ranked passages, with where each retriever ranked them | 409, 422 |
+| `GET` | `/health` | | Document and chunk counts, active answerer, `dense_search`: `"ok"` or why dense/hybrid search is refused | |
+
+Errors come back as `{"detail": "..."}`. **409**: dense or hybrid search on an index built with another
+embedding model or by an older version (bm25 `/search` still works; the message says how to rebuild).
+**422**: the body failed validation (empty or over 1000 characters, `top_k` outside 1–20, unknown `mode`).
+**502**: Claude returned an error. **503**: Claude is rate limited or unreachable; try again. The 502/503
+errors only come from `/ask` with the Claude answerer. `/docs` lists the same responses.
 
 ### Configuration
 
@@ -124,11 +183,13 @@ docker build -t sourced . && docker run -p 8000:8000 -e ANTHROPIC_API_KEY source
 ## Tests
 
 ```bash
-pytest -q        # 24 tests, ~0.2 s, no network: a hashing embedder stands in for the model
+pytest -q        # 68 tests, ~1.5 s, no network: a hashing embedder stands in for the model
 ruff check src tests
 ```
 
-The tests cover heading-aware chunking (including code fences and overlap), FTS5 query sanitizing, RRF math, reranking, idempotent re-ingestion, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, API validation and error mapping, and a BM25 regression floor on the real handbook.
+The tests cover heading-aware chunking (code fences, overlap, splitting paragraphs longer than a chunk, headings like `C#`), FTS5 query sanitizing (including accented words), RRF math, reranking, idempotent re-ingestion, keeping the index in step with the folder (another process re-indexing, deleted files, one folder per index, old indexes), one ingest at a time across processes (lock contention, release on failure and on a killed process), refusing an index built with another model, vector size or chunking, the exact request sent to Claude (search-result blocks, citations, fallback), turning citations into numbered markers, refusal handling, API validation and error mapping, the eval command, and a BM25 regression floor on the real handbook.
+
+One test builds the request with the real `anthropic` SDK over a mocked HTTP transport, so it checks the beta header and the serialized body the SDK actually sends, and that a cited reply parses. It does not show that the live API accepts the request; only a call with a real key does that.
 
 CI runs three jobs: lint + tests, the retrieval quality gate with real models, and a Docker smoke test that builds the image and asks it a question.
 

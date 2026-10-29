@@ -62,18 +62,33 @@ def first_gold_rank(question: Question, chunks: Iterable[Chunk]) -> int | None:
     return None
 
 
-def score_retrieval(pipeline: Pipeline, questions: list[Question], mode: str, rerank: bool = False) -> RetrievalScores:
+def rank_questions(pipeline: Pipeline, questions: list[Question], mode: str, rerank: bool = False) -> list[int | None]:
+    """The rank of the first correct result for each question (None if not in the top ``MRR_DEPTH``)."""
     ranks: list[int | None] = []
     for q in questions:
         results = pipeline.search(q.question, top_k=MRR_DEPTH, mode=mode, rerank=rerank)
         ranks.append(first_gold_rank(q, (r.chunk for r in results)))
+    return ranks
+
+
+def score_retrieval(pipeline: Pipeline, questions: list[Question], mode: str, rerank: bool = False) -> RetrievalScores:
+    return summarize(rank_questions(pipeline, questions, mode, rerank))
+
+
+def summarize(ranks: list[int | None]) -> RetrievalScores:
     n = len(ranks)
     hits = {k: sum(1 for r in ranks if r is not None and r <= k) / n for k in K_VALUES}
     mrr = sum(1 / r for r in ranks if r is not None) / n
     return RetrievalScores(n, hits, mrr)
 
 
-def retrieval_report(pipeline: Pipeline, questions: list[Question], with_rerank: bool) -> str:
+def retrieval_report(
+    pipeline: Pipeline, questions: list[Question], with_rerank: bool
+) -> tuple[str, dict[tuple[str, bool], RetrievalScores]]:
+    """The markdown table, and each retriever's overall scores keyed by (mode, rerank).
+
+    Every question is searched once per retriever; the per-kind columns reuse those ranks.
+    """
     answerable = [q for q in questions if q.answerable]
     kinds = sorted({q.kind for q in answerable})
     configs = [("BM25", "bm25", False), ("Dense", "dense", False), ("Hybrid (RRF)", "hybrid", False)]
@@ -94,9 +109,11 @@ def retrieval_report(pipeline: Pipeline, questions: list[Question], with_rerank:
         header,
         "|" + "---|" * (len(K_VALUES) + 2 + len(kinds)),
     ]
+    scores: dict[tuple[str, bool], RetrievalScores] = {}
     for label, mode, rerank in configs:
-        overall = score_retrieval(pipeline, answerable, mode, rerank)
-        by_kind = [score_retrieval(pipeline, [q for q in answerable if q.kind == k], mode, rerank) for k in kinds]
+        ranks = rank_questions(pipeline, answerable, mode, rerank)
+        overall = scores[mode, rerank] = summarize(ranks)
+        by_kind = [summarize([r for q, r in zip(answerable, ranks, strict=True) if q.kind == k]) for k in kinds]
         lines.append(
             f"| {label} | "
             + " | ".join(f"{overall.hits[k]:.2f}" for k in K_VALUES)
@@ -104,7 +121,7 @@ def retrieval_report(pipeline: Pipeline, questions: list[Question], with_rerank:
             + " | ".join(f"{s.hits[3]:.2f}" for s in by_kind)
             + " |"
         )
-    return "\n".join(lines)
+    return "\n".join(lines), scores
 
 
 def answer_report(pipeline: Pipeline, questions: list[Question]) -> str:
