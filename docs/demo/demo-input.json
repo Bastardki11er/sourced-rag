@@ -1,0 +1,41 @@
+{
+  "extractive_run": {
+    "source": "Run on 2026-10-29 for docs/demo.md: sample handbook, new temporary index, cached local models, SOURCED_ANSWERER=extractive, no Claude call. stdout of each command, unchanged.",
+    "setup": "SOURCED_ANSWERER=extractive  SOURCED_INDEX=/tmp/sourced-demo/index.db",
+    "steps": [
+      {
+        "cmd": "sourced ingest data/handbook",
+        "exit": 0,
+        "stdout": "added 14, updated 0, unchanged 0, removed 0 -> 87 chunks in /tmp/sourced-demo/index.db\n"
+      },
+      {
+        "cmd": "sourced search \"How do I undo a bad release?\" --top-k 3",
+        "exit": 0,
+        "stdout": "[1] deployment.md - Deploying to Production > Rolling back  (bm25 #3, dense #2)\n    To roll back, run: ``` kctl rollback --to <release-id> ``` Rollbacks do not need approval and should be your first move when a release causes an incident. A rollback takes about 8 minutes to reach every site. After rolling back, open a ticket so the change can be fixed before the next train.\n[2] incident-response.md - Incident Response > Mitigation first  (bm25 #5, dense #1)\n    Restore service before you investigate. Rolling back the most recent deploy is the default first step whenever an incident starts within two hours of a release. Feature flags should be turned off before attempting a code fix.\n[3] deployment.md - Deploying to Production  (bm25 #4, dense #10)\n    We ship the fleet software through scheduled release trains. This page covers the schedule, the canary process, freezes, and how to roll back.\n"
+      },
+      {
+        "cmd": "sourced ask \"How do I undo a bad release?\"",
+        "exit": 0,
+        "stdout": "To roll back, run:\n\n```\nkctl rollback --to <release-id>\n```\n\nRollbacks do not need approval and should be your first move when a release causes an incident. A rollback takes about 8 minutes to reach every site. After rolling back, open a ticket so the change can be fixed before the next train. [1]\n\n[1] deployment.md - Deploying to Production > Rolling back\n    > To roll back, run: ``` kctl rollback --to <release-id> ``` Rollbacks do not need approval and should be your first move when a release causes an incident. A rollback takes about 8 minutes to [...]\n\n(extractive; retrieval 106.7 ms, generation 0.0 ms)\n"
+      },
+      {
+        "cmd": "sed -n '21,29p' data/handbook/deployment.md",
+        "exit": 0,
+        "stdout": "## Rolling back\n\nTo roll back, run:\n\n```\nkctl rollback --to <release-id>\n```\n\nRollbacks do not need approval and should be your first move when a release causes an incident. A rollback takes about 8 minutes to reach every site. After rolling back, open a ticket so the change can be fixed before the next train.\n"
+      }
+    ]
+  },
+  "historical_claude": {
+    "source": "One record of the opt-in live check, 2026-10-29 UTC (see docs/evaluation.md). Only the fields shown in the replay; the full record is not published.",
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "stop_reason": "end_turn",
+    "question": "What is the command to roll back a release?",
+    "answer": "The rollback command is `kctl rollback --to <release-id>`[1]\n\n- **No approval needed:** Rollbacks do not need approval and should be your first move when a release causes an incident.[1]\n- **Timing:** A rollback takes about 8 minutes to reach every site.[1]\n- **Follow-up:** After rolling back, open a ticket so the change can be fixed before the next train.[1]",
+    "citation": {
+      "number": 1,
+      "source": "deployment.md",
+      "heading": "Deploying to Production > Rolling back"
+    }
+  }
+}
