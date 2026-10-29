@@ -83,3 +83,29 @@ def test_ingest_with_a_symlink_in_the_folder_exits_with_an_error(make_pipeline, 
     assert cli.main(["ingest", str(docs)]) == 2
     assert "is a symbolic link" in capsys.readouterr().err
     assert shared.index.sources() == []
+
+
+def test_eval_answers_follow_the_rerank_flag_the_pipeline_was_built_with(make_pipeline, monkeypatch, tmp_path, capsys):
+    # Same wiring as the real CLI: a reranker is loaded only when the command asks for one,
+    # while SOURCED_RERANK keeps its default (true).
+    from conftest import HANDBOOK
+    from sourced.config import Settings
+
+    class ScoresByLength:
+        def score(self, query, passages):
+            return [float(len(p)) for p in passages]
+
+    built = {}
+
+    def build(settings, with_reranker=None):
+        built["pipeline"] = make_pipeline(reranker=ScoresByLength() if with_reranker else None)
+        built["pipeline"].settings = Settings(index_path=built["pipeline"].settings.index_path)  # rerank=True
+        built["pipeline"].ingest(HANDBOOK)
+        return built["pipeline"]
+
+    monkeypatch.setattr(pipeline, "build_pipeline", build)
+    questions = Path(__file__).parent.parent / "eval" / "questions.jsonl"
+
+    assert cli.main(["eval", str(questions), "--answers"]) == 0
+    assert "Contains the expected facts" in capsys.readouterr().out
+    assert cli.main(["eval", str(questions), "--answers", "--rerank"]) == 0

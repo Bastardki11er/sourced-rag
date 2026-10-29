@@ -13,9 +13,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, StringConstraints
 
-from .config import Settings
+from .config import MAX_TOP_K, Settings
+from .generation import GenerationError
 from .pipeline import IndexConfigError, Pipeline, build_pipeline
-from .retrieval import SearchResult
+from .retrieval import RerankUnavailableError, SearchResult
 
 # Leading and trailing whitespace is dropped before the length check, so a blank query is a 422.
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
@@ -23,14 +24,14 @@ Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 
 class SearchRequest(BaseModel):
     query: Text
-    top_k: int = Field(default=5, ge=1, le=20)
+    top_k: int = Field(default=5, ge=1, le=MAX_TOP_K, strict=True)
     mode: Literal["bm25", "dense", "hybrid"] = "hybrid"
     rerank: bool = False
 
 
 class AskRequest(BaseModel):
     question: Text
-    top_k: int = Field(default=5, ge=1, le=20)
+    top_k: int = Field(default=5, ge=1, le=MAX_TOP_K, strict=True)
     rerank: bool | None = None  # None: use the server default (SOURCED_RERANK)
 
 
@@ -63,14 +64,17 @@ class ErrorOut(BaseModel):
 
 
 # Documents the errors the handlers below raise, so /docs matches them (422 is FastAPI's own).
-_INDEX_MISMATCH = {
+_RETRIEVAL_ERRORS = {
     409: {
         "model": ErrorOut,
-        "description": "Dense or hybrid search on an index built with another model or by an older version",
+        "description": "Incompatible index for dense/hybrid search, or requested reranking is disabled",
     }
 }
 _LLM_ERRORS = {
-    502: {"model": ErrorOut, "description": "The language model returned an error"},
+    502: {
+        "model": ErrorOut,
+        "description": "The language model returned an error, an unfinished answer or an empty answer",
+    },
     503: {"model": ErrorOut, "description": "The language model is rate limited or unreachable"},
 }
 
@@ -103,25 +107,28 @@ def create_app(pipeline: Pipeline | None = None) -> FastAPI:
             "documents": len(p.index.sources()),
             "chunks": p.index.chunk_count(),
             "answerer": p.answerer.name,
+            "reranking": "ok" if p.retriever.reranker is not None else "disabled",
             "dense_search": p.index.vector_space_problem(p.embedder.model_id, p.embedder.dimensions) or "ok",
         }
 
-    @app.post("/search", response_model=list[Passage], responses=_INDEX_MISMATCH)
+    @app.post("/search", response_model=list[Passage], responses=_RETRIEVAL_ERRORS)
     async def search(body: SearchRequest, request: Request) -> list[Passage]:
         p: Pipeline = request.app.state.pipeline
         try:
             results = await run_in_threadpool(p.search, body.query, body.top_k, body.mode, body.rerank)
-        except IndexConfigError as exc:
+        except (IndexConfigError, RerankUnavailableError) as exc:
             raise HTTPException(409, str(exc)) from exc
         return [_passage(r) for r in results]
 
-    @app.post("/ask", response_model=AskResponse, responses={**_INDEX_MISMATCH, **_LLM_ERRORS})
+    @app.post("/ask", response_model=AskResponse, responses={**_RETRIEVAL_ERRORS, **_LLM_ERRORS})
     async def ask(body: AskRequest, request: Request) -> AskResponse:
         p: Pipeline = request.app.state.pipeline
         try:
             result = await run_in_threadpool(p.ask, body.question, body.top_k, body.rerank)
-        except IndexConfigError as exc:  # the index's vectors don't match this server's model
+        except (IndexConfigError, RerankUnavailableError) as exc:
             raise HTTPException(409, str(exc)) from exc
+        except GenerationError as exc:
+            raise HTTPException(502, str(exc)) from exc
         except (anthropic.RateLimitError, anthropic.APIConnectionError) as exc:
             raise HTTPException(503, "The language model is temporarily unavailable, try again shortly") from exc
         except anthropic.APIStatusError as exc:

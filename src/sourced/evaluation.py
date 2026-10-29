@@ -124,14 +124,15 @@ def retrieval_report(
     return "\n".join(lines), scores
 
 
-def answer_report(pipeline: Pipeline, questions: list[Question]) -> str:
+def answer_report(pipeline: Pipeline, questions: list[Question], rerank: bool = False) -> str:
+    """Asks every question; ``rerank`` must match whether the pipeline has a reranker loaded."""
     correct = cited_right = declined = 0
     answerable = [q for q in questions if q.answerable]
     unanswerable = [q for q in questions if not q.answerable]
     failures: list[str] = []
 
     for q in questions:
-        result = pipeline.ask(q.question)
+        result = pipeline.ask(q.question, rerank=rerank)
         text = result.answer.text.lower()
         if q.answerable:
             ok = all(fact.lower() in text for fact in q.answer_contains)
