@@ -18,14 +18,14 @@ import anthropic
 from .retrieval import SearchResult
 
 SYSTEM_PROMPT = """\
-You answer questions from employees using only the search results in the user's message, \
-which come from the company handbook.
+You answer the user's question using only the search results in their message, which come from \
+the provided documents.
 
 Keep answers short and specific: lead with the direct answer, then add only the details \
 needed to act on it. If the search results do not contain the answer, say that you could \
-not find it in the handbook instead of guessing, and do not cite anything."""
+not find it in the provided documents instead of guessing, and do not cite anything."""
 
-NOT_FOUND = "I couldn't find that in the handbook."
+NOT_FOUND = "I couldn't find that in the provided documents."
 MAX_TOKENS = 16000  # thinking counts toward it; the live check budgets each call against it
 
 

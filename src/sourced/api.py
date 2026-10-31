@@ -75,7 +75,7 @@ _LLM_ERRORS = {
         "model": ErrorOut,
         "description": "The language model returned an error, an unfinished answer or an empty answer",
     },
-    503: {"model": ErrorOut, "description": "The language model is rate limited or unreachable"},
+    503: {"model": ErrorOut, "description": "The language model is rate limited, overloaded, unreachable or timed out"},
 }
 
 
@@ -129,7 +129,7 @@ def create_app(pipeline: Pipeline | None = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         except GenerationError as exc:
             raise HTTPException(502, str(exc)) from exc
-        except (anthropic.RateLimitError, anthropic.APIConnectionError) as exc:
+        except (anthropic.RateLimitError, anthropic.OverloadedError, anthropic.APIConnectionError) as exc:
             raise HTTPException(503, "The language model is temporarily unavailable, try again shortly") from exc
         except anthropic.APIStatusError as exc:
             raise HTTPException(502, f"The language model returned an error ({exc.status_code})") from exc

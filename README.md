@@ -52,7 +52,7 @@ Unless the row says otherwise, on the bundled sample handbook: 14 short document
 | …also on real documentation it wasn't written for | **Prometheus docs** (23 pages, 417 chunks, 24 answerable questions): hybrid + rerank hit@1 0.92, hit@5 1.00; BM25 alone hit@5 0.96 | one external corpus, questions written by the developer's assistant; not in CI ([details](docs/evaluation.md#external-corpus-prometheus-documentation)) |
 | Retrieval is fast enough for interactive use | Prometheus docs, 417 chunks: hybrid 3.1–3.2 ms p50, hybrid + rerank 296–332 ms p50 (3 rounds) | one laptop, one query at a time; not a load test ([performance](docs/performance.md)) |
 | Claude answers from the retrieved passages, with checkable citations | 12 questions on 2026-10-29: facts right on all 10 answerable ones (one added unsupported phrase), both unanswerable ones declined, two planted prompt injections not followed; $0.14 from response usage | small one-off sample, not an accuracy rate |
-| The service behaves as documented | 201 offline tests; CI builds the Docker image and queries it | the CI smoke test uses the extractive mode |
+| The service behaves as documented | 227 offline tests; CI builds the Docker image and queries it | the CI smoke test uses the extractive mode |
 
 **Costs** on an Apple M5 laptop (2026-10-29), measured one query or one ingest at a time: no concurrency, not
 a load test.
@@ -152,11 +152,25 @@ Errors come back as `{"detail": "..."}`:
 - **422**: the body failed validation: `query` / `question` blank or over 1000 characters once surrounding
   whitespace is removed, `top_k` not an integer from 1 to 20, or an unknown `mode`.
 - **502**: Claude returned an error, stopped before finishing (for example at `max_tokens`), or returned no
-  answer text. Partial text is never returned as an answer, and nothing is retried automatically.
-- **503**: Claude is rate limited or unreachable; try again.
+  answer text. Partial text is never returned as an answer.
+- **503**: Claude is rate limited (429), overloaded (529), unreachable, or the request timed out; try again.
 
-502 and 503 only come from `/ask` with the Claude answerer. `/docs` lists the same responses. The CLI exits
-with code 2 in the 409, 422 and 502 situations.
+502 and 503 only come from `/ask` with the Claude answerer. `/docs` lists the same responses.
+
+**Retries and timeouts.** The Claude client makes no automatic retries (`max_retries=0`), so a failed
+`/ask` sends one HTTP request; asking again is up to the caller. The client's `timeout=60.0` is passed to its
+HTTP library, which applies it to each step of the request (connecting, sending, waiting for the next data);
+so it is not a total limit on the request, and even less on the whole `/ask` call, which also includes
+retrieval and reranking.
+Separately, the request enables the API's server-side refusal fallback: if Claude declines, the API itself may
+answer with a fallback model inside that same request (not yet seen to trigger).
+
+**CLI errors.** `sourced` prints one line, `sourced: error: ...`, and exits with code 2 for: an invalid `SOURCED_*` setting or a missing path; an index that
+doesn't fit (another folder, model, chunking, or an ingest already running); a blank query or invalid
+`--top-k`; requested reranking that isn't loaded; a document that is a link, hidden, unsupported or not valid
+UTF-8 (named in the message); and a failed Claude call, described by kind (rate limit, overload, timeout,
+connection, authentication or the HTTP status) without the upstream response. An unfinished or empty Claude
+answer is an error too, never shown as an answer.
 
 ## Documentation
 
@@ -169,7 +183,7 @@ with code 2 in the 409, 422 and 502 situations.
 ## Tests
 
 ```bash
-pytest -q        # 201 tests, ~2.5 s, no network: a hashing embedder stands in for the model
+pytest -q        # 227 tests, ~3 s, no network: a hashing embedder stands in for the model
 ruff check src tests bench eval docs
 ```
 

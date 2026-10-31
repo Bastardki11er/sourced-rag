@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sourced import cli, pipeline
 
 
@@ -109,3 +111,74 @@ def test_eval_answers_follow_the_rerank_flag_the_pipeline_was_built_with(make_pi
     assert cli.main(["eval", str(questions), "--answers"]) == 0
     assert "Contains the expected facts" in capsys.readouterr().out
     assert cli.main(["eval", str(questions), "--answers", "--rerank"]) == 0
+
+
+def _claude_pipeline(handbook_pipeline, status=None, raise_timeout=False):
+    import anthropic
+    import httpx2
+
+    from sourced.generation import ClaudeAnswerer
+
+    def handler(request):
+        if raise_timeout:
+            raise httpx2.ReadTimeout("timed out", request=request)
+        body = {"type": "error", "error": {"type": "x", "message": "SECRET-UPSTREAM-BODY"}}
+        return httpx2.Response(status, json=body)
+
+    sdk = anthropic.Anthropic(
+        api_key="test-key-not-real", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(handler))
+    )
+    handbook_pipeline.answerer = ClaudeAnswerer(sdk, "claude-opus-5-5", "medium")
+    return handbook_pipeline
+
+
+@pytest.mark.parametrize(
+    "status, timeout, words",
+    [
+        (429, False, "rate limit"),
+        (529, False, "overloaded"),
+        (None, True, "timed out"),
+        (500, False, "500"),
+        (401, False, "authentication"),
+    ],
+    ids=["429", "529", "timeout", "500", "401"],
+)
+def test_claude_errors_in_ask_are_short_clear_and_exit_2(
+    handbook_pipeline, monkeypatch, capsys, status, timeout, words
+):
+    pipeline_ = _claude_pipeline(handbook_pipeline, status, timeout)
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda settings, with_reranker=None: pipeline_)
+
+    assert cli.main(["ask", "How do I roll back a release?"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""  # no answer, extractive or otherwise
+    assert words in captured.err.lower() and captured.err.startswith("sourced: error:")
+    for leak in ("Traceback", "SECRET-UPSTREAM-BODY", "test-key-not-real", "x-api-key"):
+        assert leak not in captured.err
+
+
+def test_an_undecodable_document_names_the_file_and_exits_2(make_pipeline, monkeypatch, tmp_path, capsys):
+    shared = make_pipeline()
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda settings, with_reranker=None: shared)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\n\n## One\n\nFirst.\n")
+    assert cli.main(["ingest", str(docs)]) == 0
+    (docs / "a.md").unlink()
+    (docs / "b.md").write_bytes(b"# B\n\n\xff\xfe\n")
+    capsys.readouterr()
+
+    assert cli.main(["ingest", str(docs)]) == 2
+    err = capsys.readouterr().err
+    assert "b.md" in err and "UTF-8" in err and "Traceback" not in err
+    assert shared.index.sources() == ["a.md"]  # nothing removed
+
+
+def test_an_unsupported_single_file_exits_2(make_pipeline, monkeypatch, tmp_path, capsys):
+    shared = make_pipeline()
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda settings, with_reranker=None: shared)
+    (tmp_path / "script.py").write_text("print('hi')\n")
+
+    assert cli.main(["ingest", str(tmp_path / "script.py")]) == 2
+    assert "not a supported document" in capsys.readouterr().err
+    assert shared.index.sources() == []
