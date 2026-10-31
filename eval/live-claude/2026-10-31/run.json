@@ -1,0 +1,25 @@
+{
+  "when_utc": "2026-10-31, record written 19:03:30Z",
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "calls": "12 calls, one per question",
+  "budget_usd": "1",
+  "index": "local index of data/handbook: fastembed:BAAI/bge-small-en-v1.5, 384 dimensions, max_chunk_chars 1200, chunker version 3",
+  "system_prompt_sha256": "244b5e61c96cb1c1a6c64f6aa5f4a3273cc1ef1d9c690eec8a42ff855b2607d8",
+  "system_prompt_source": "the SYSTEM_PROMPT text in src/sourced/generation.py at 12ed357 ('the provided documents')",
+  "code": "commit 725fa76 plus uncommitted changes; no file under src/ changed after the run, and src/ at run time is byte-identical to commit 12ed357 (hashes below)",
+  "src_sha256_at_run_time": {
+    "src/sourced/__init__.py": "f9e433f05de8726639a9c963dee6206124a562e0967d60c97b50f01c82135b21",
+    "src/sourced/api.py": "e994ededa8a454a91dc1cd5dc4c34c66fd4e172d4517c43db150ab36b7888200",
+    "src/sourced/chunking.py": "e3c1ea614e6d9381792775d0cce591da44f4ee95b12cd47a79a4d9a5da849347",
+    "src/sourced/cli.py": "a95cb3c7e8570a7f22b8279198c1f7a7ca2ffb33fcc8d90eae0de2ec9920fd78",
+    "src/sourced/config.py": "66e0c6dce10484d0f62c259f4bfe7a85e1c3dffaba68397dfa5e25f14062c76c",
+    "src/sourced/embeddings.py": "afe60d004608353590ce9ae1659c6bef7a2c8c5024bcce1bd77135146059801f",
+    "src/sourced/evaluation.py": "3e56b94085cb5e9a37ffa3aaed317c025c17e25a806e491a0d22454c6579c619",
+    "src/sourced/generation.py": "9b1be0d06d389566e9631549aa09eb4b39edd0a4e7ecf4c596ef1703127bbb6c",
+    "src/sourced/live_check.py": "e8cdf69d4dc6f6928af90861109c95b7ad537b1c0b24ab022238f4a1381044e8",
+    "src/sourced/pipeline.py": "3fcabf45fa1fb0ec4a1519bd24fd478d0c535e956cac5d9f7917eeaf266ab5ef",
+    "src/sourced/retrieval.py": "19ad139c9cb789e95c452004564de09ba1ebccc273c0baf9660f85be6bb49cec",
+    "src/sourced/store.py": "e5524025f1689597640c2f42521a471af09c15bdb2737a25d3f16993421f0e73"
+  }
+}

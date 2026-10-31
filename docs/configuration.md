@@ -55,6 +55,10 @@ of the code, not a setting. Details: [index-management.md](index-management.md#w
 ## Answerer
 
 - `claude`: Claude writes the answer from the retrieved passages, with structured citations.
+  The client makes no automatic retries (`max_retries=0`) and uses `timeout=60.0`, which its HTTP library
+  applies to each step (connecting, sending, waiting for data), not as a total deadline; 429, 529, connection
+  failures and timeouts give HTTP 503. The API's server-side refusal fallback stays enabled. These are fixed in
+  code, not settings.
 - `extractive`: no language model. `/ask` returns the top-ranked passage verbatim with one citation. It does
   not judge whether the passage answers the question, so even an unrelated question gets a passage with
   `refused: false`; a citation is not evidence that the answer is right.

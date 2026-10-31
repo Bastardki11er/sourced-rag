@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from conftest import index_state
+from sourced.pipeline import DocumentReadError
 
 CHILD = Path(__file__).parent / "ingest_child.py"
 
@@ -76,7 +77,7 @@ def test_the_lock_is_released_when_the_holder_is_killed(paused_child, docs):
 def test_the_lock_is_released_when_ingest_fails(make_pipeline, docs):
     pipeline = make_pipeline()
     (docs / "0-broken.md").write_bytes(b"\xff\xfe")  # sorts first: fails before writing anything
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(DocumentReadError, match=r"0-broken\.md.*UTF-8"):
         pipeline.ingest(docs)
     (docs / "0-broken.md").unlink()
 

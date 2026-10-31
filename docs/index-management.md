@@ -8,16 +8,25 @@ safely. Settings are described in [configuration.md](configuration.md).
 - **One folder per index.** The first `sourced ingest <folder>` binds the index to that folder (its resolved
   absolute path). Ingesting a different folder is refused before anything changes; give it its own index with
   `SOURCED_INDEX=other.db sourced ingest <other-folder>`.
+- **Which files are documents.** Files ending in `.md`, `.markdown` or `.txt`, in any case (`README.MD`
+  counts). Anything hidden inside the folder is skipped: a file or directory whose name starts with `.`
+  (`.git`, `.venv`, `.draft.md`, ...) is not read, and a hidden directory is not even entered, so nothing in it
+  is listed or checked for links. The folder you ingest may itself be hidden (`sourced ingest ~/.notes`); the
+  rule applies to the paths inside it. Other files are ignored by a folder ingest.
 - **Single files** (`sourced ingest docs/team/oncall.md`) must live inside the bound folder and keep their
-  folder-relative name (`team/oncall.md`). On a new index, a single file binds its parent folder.
+  folder-relative name (`team/oncall.md`). On a new index, a single file binds its parent folder. A single
+  file must be a document by the rule above: an unsupported suffix, or a hidden file or directory anywhere in
+  its path inside the folder, stops `ingest` with exit code 2 and changes nothing.
 - **Changed files only.** A file whose content hash is unchanged is skipped; a changed file has all of its
   chunks replaced in one transaction.
 - **Deleted files.** Ingesting the whole folder removes documents whose file is gone, together with their
   chunks, keyword index entries and embeddings, and reports `removed N`. This only happens after a full
   folder scan where every file ingested successfully: ingesting a single file never removes anything, and a
-  missing folder or a file that fails to read stops the run before any removal.
-- **Symbolic links are not followed.** The folder itself may be reached through a link, but a link inside it
-  (to a file, a directory, or nothing), a single file that is a link, or a single file reached through a
+  missing folder, a directory that can't be listed, or a file that can't be read (named in the error, e.g. not
+  valid UTF-8) stops the run before any removal. Documents that an older version indexed from hidden paths
+  are removed by the next successful folder ingest, like any other file that is no longer a document.
+- **Symbolic links are not followed.** The folder itself may be reached through a link, but a visible link
+  inside it (to a file, a directory, or nothing), a single file that is a link, or a single file reached through a
   linked directory inside the folder stops `ingest` with exit code 2 before anything is read, written or
   removed. Copy the file in or remove the link. This keeps text from outside the folder out of the index for
   a trusted local folder; it is checked once at the start, not against files being swapped while ingest runs.

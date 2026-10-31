@@ -9,6 +9,7 @@ import pytest
 from conftest import index_state
 from sourced.chunking import chunk_markdown
 from sourced.embeddings import HashingEmbedder
+from sourced.pipeline import DocumentReadError
 from sourced.store import Index
 
 
@@ -83,7 +84,7 @@ def test_an_index_from_an_older_chunker_is_refused(make_pipeline, built, docs):
 def test_a_failed_first_ingest_can_be_retried_with_the_same_configuration_only(make_pipeline, docs):
     (docs / "broken.md").write_bytes(b"\xff\xfe not UTF-8")
     pipeline = make_pipeline()
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(DocumentReadError, match=r"broken\.md.*UTF-8"):
         pipeline.ingest(docs)
     (docs / "broken.md").unlink()
 

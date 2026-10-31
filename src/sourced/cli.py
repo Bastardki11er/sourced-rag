@@ -85,8 +85,17 @@ def main(argv: list[str] | None = None) -> int:
         wants_rerank = settings.rerank if wants_rerank is None else wants_rerank
     pipeline = build_pipeline(settings, with_reranker=bool(wants_rerank))
 
+    import anthropic
+
     from .generation import GenerationError
-    from .pipeline import DocumentLinkError, IndexBindingError, IndexBusyError, IndexConfigError
+    from .pipeline import (
+        DocumentLinkError,
+        DocumentReadError,
+        IndexBindingError,
+        IndexBusyError,
+        IndexConfigError,
+        UnsupportedDocumentError,
+    )
     from .retrieval import EmptyQueryError, RerankUnavailableError
 
     try:
@@ -96,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         IndexBusyError,
         IndexConfigError,
         DocumentLinkError,
+        DocumentReadError,
+        UnsupportedDocumentError,
         EmptyQueryError,
         RerankUnavailableError,
         GenerationError,
@@ -103,6 +114,28 @@ def main(argv: list[str] | None = None) -> int:
     ) as error:
         print(f"sourced: error: {error}", file=sys.stderr)
         return 2
+    except anthropic.APIError as error:  # never the SDK's own text: it can carry the upstream response body
+        print(f"sourced: error: {_claude_error(error)}", file=sys.stderr)
+        return 2
+
+
+def _claude_error(error) -> str:
+    """A short, safe description of a failed Claude call."""
+    import anthropic
+
+    if isinstance(error, anthropic.APITimeoutError):
+        return "the Claude API request timed out; try again later"
+    if isinstance(error, anthropic.APIConnectionError):
+        return "could not reach the Claude API (connection failed); check the network and try again"
+    if isinstance(error, anthropic.RateLimitError):
+        return "Claude rate limit reached (HTTP 429); wait a moment and try again"
+    if isinstance(error, anthropic.OverloadedError):
+        return "Claude is overloaded (HTTP 529); try again shortly"
+    if isinstance(error, anthropic.AuthenticationError):
+        return "Claude authentication failed (HTTP 401); check ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN"
+    if isinstance(error, anthropic.APIStatusError):
+        return f"the Claude API returned an error (HTTP {error.status_code})"
+    return f"the Claude API call failed ({type(error).__name__})"
 
 
 def _run(args: argparse.Namespace, settings: Settings, pipeline) -> int:

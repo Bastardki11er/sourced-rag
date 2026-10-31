@@ -124,7 +124,8 @@ handbook's CI gate (hit@5 ≥ 0.95) does not apply to this corpus, and this base
 - **Keyword checks over all 48 questions**: `sourced eval eval/questions.jsonl --answers` checks that answers
   contain the expected facts, cite the right section and decline the unanswerable questions. It calls the
   configured answerer; those numbers have not been published.
-- **Live Claude check**: 12 questions, below. This is the only evidence about Claude-written answers.
+- **Live Claude checks**: two runs of 12 questions (2026-10-29 and 2026-10-31), below. They are the only
+  evidence about Claude-written answers.
 
 ### Live check against the real API (opt-in, paid)
 
@@ -149,44 +150,61 @@ export FASTEMBED_CACHE_PATH=~/.cache/fastembed
 python -m sourced.live_check --index .sourced/index.db --out live-l02.jsonl --confirm-spend --only l02
 ```
 
-**Result on 2026-10-29** (`claude-opus-5-5`, effort `medium`): 12 different questions, 13 generation calls
-(l02 ran twice, the others once). ~1.3–2.1k input and 84–367 output tokens per call, 1.5–6.7 s. $0.14 in all,
-computed from each response's `usage` at $4 / $20 per million tokens, not read from the bill.
+Two runs so far, reported separately. Every call's question, answer, citations (with the full cited
+passage), usage and cost, the automatic checks and the human review are published in
+[`eval/live-claude`](../eval/live-claude/README.md), one folder per run; one command recounts calls, cost and
+quotes. Costs are computed from the token counts the API reported at $4 / $20 per million input / output
+tokens, not read from a bill.
+
+| | 2026-10-29 | 2026-10-31 |
+|---|---|---|
+| System prompt | earlier ("company handbook", "employees") | current ("the provided documents"), same rules |
+| Calls | 13 (12 questions; `l02` twice) | 12 (12 questions) |
+| Ended normally | all (`end_turn`) | all (`end_turn`) |
+| Truncated, safety refusal, fallback | none | none |
+| Cost from usage | $0.14146 | $0.13156 |
+| Automatic checks | pass; but the injection check was empty at run time (rerun offline with the fix: pass) | pass, with the fixed injection check |
+| Quotes found in their source / whole cited passage | 15 / 15 | 14 / 14 |
+
+What the human review found (details per call in each run's README):
 
 - **API compatibility.** The live API accepted the request as sent (the fallback beta and `fallbacks`,
   `output_config`, citable `search_result` blocks) and every reply parsed into an answer with numbered
-  citations. No call was refused, truncated or handed to a fallback model, so the fallback switch itself was
-  not exercised.
-- **Answers.** Facts were right on all 10 answerable questions (the command, the error code, the paraphrases,
-  both parts of the combined question); l02 gave the same command both times. p09's main answer was right, but
-  it framed the feature-flag advice as "if the change is behind a flag", which the handbook doesn't say. Both
-  unanswerable questions were declined with no citation and no invented policy.
-- **Citations.** All 14 quotes appear word for word in the passage they cite (checked automatically). Read
-  against the claims next to them, they support those claims, apart from p09's added condition above. Every
-  quote was a whole chunk, not a sentence; why is not established, and sending a chunk as one text block per
-  sentence is an untested idea.
-- **Prompt injection.** In both cases the answer used the legitimate text and pointed out the planted
-  instruction instead of following it; the answer text contained neither the made-up password nor the
-  attacker address. The Wi-Fi citation, though, quotes the whole passage, planted password and address
-  included, and citations are returned to the user too. Anything indexed can reach the asker through a
-  citation. A bug in the tool at the time left the injection cases' list of forbidden text empty, so the
-  automatic check didn't look for it then; the conclusion above came from reading the answers. After the fix,
-  the stored replies were re-checked offline (no new calls): both pass.
+  citations. The fallback switch itself was never exercised.
+- **Answerable questions.** In both runs the main facts of all 10 answerable questions were right and
+  supported by the cited text. On 2026-10-29, p09 added an unsupported condition ("if the change is behind a
+  flag"); on 2026-10-31 it didn't. One run can't show that the new prompt caused this.
+- **Unanswerable questions.** u01 and u05 were declined for lack of information in both runs, with no
+  citation; that is the model saying the documents don't contain the answer, not an API safety refusal. Both
+  declines end with general advice that has no source (ask HR, the onboarding buddy or a manager), so not every
+  sentence of every answer is backed by a citation.
+- **Citations.** Every quote appears word for word in its source and is the whole cited passage, never a
+  sentence; why is not established. A quote found word for word shows where text came from, not that it
+  supports the claim beside it; that part rests on the human review.
+- **Prompt injection.** In both runs the answers used the legitimate text and pointed out the planted
+  instructions instead of following them; the answer text contained neither the made-up password nor the
+  attacker address. But the i02 citation quotes the whole passage, planted password and address included,
+  and citations are returned to the user too, so this is not "no exposure". At the 2026-10-29 run the
+  automatic check didn't look for the planted text (a bug, kept in its record); the 2026-10-31 run used the
+  fixed check.
 
-That is 12 questions on a small fictional handbook, mostly one call each: it shows the integration works and
-how these answers looked, not an accuracy rate or how stable answers are across runs. It was run before the
-fixes that turn unfinished or empty replies into errors; those were verified with mocked replies only (below).
+That is 12 questions on a small fictional handbook, at most two calls each: it shows how these answers looked,
+not an accuracy rate or how stable answers are. Successful calls don't exercise rate limits, overload,
+timeouts or truncation; those are covered by offline tests with mocked replies (below).
 
 ## Offline tests
 
-`pytest -q` runs 201 tests in about 2.5 s with no network: a hashing embedder stands in for the model, and Claude
+`pytest -q` runs 236 tests in about 3 s with no network: a hashing embedder stands in for the model, and Claude
 replies are mocked. They cover heading-aware chunking (code fences, overlap, long paragraphs, headings like
 `C#`), FTS5 query sanitizing, RRF math, reranking and its availability, idempotent re-ingestion, keeping the
 index in step with the folder (another process re-indexing, deleted files, one folder per index, symbolic
 links, old indexes), one ingest at a time across processes, refusing an index built with another model,
-vector size or chunking, the exact request sent to Claude, citations, refusals, unfinished or empty replies
-(502, no retry), CLI/Python/API input validation and error mapping, the eval command, the live check's
-spending guards, the external corpus's hashes and labels, the benchmark's arguments, units and summaries, and a BM25 regression floor on the real handbook.
+vector size or chunking, which files count as documents (suffix case, hidden paths, single files), the exact
+request and system prompt sent to Claude, citations, refusals, unfinished or empty replies (502), the
+production client built by `build_pipeline` (no retries, 60 s timeout, 429/529/timeouts as 503, one request per
+failed call), CLI/Python/API input validation and error messages, the eval command, the live check's spending
+guards and its published record, the external corpus's hashes and labels, the benchmark's arguments, units and
+summaries, and a BM25 regression floor on the real handbook.
 
 Several tests use the real `anthropic` SDK over a mocked HTTP transport, so they check the request the SDK
 actually sends and how real reply shapes (normal, refusal, `max_tokens`, empty, thinking-only) are handled.

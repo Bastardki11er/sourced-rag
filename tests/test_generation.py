@@ -194,3 +194,38 @@ def test_the_real_sdk_serializes_the_request_and_parses_a_cited_reply():
     assert [(c.source, c.heading) for c in answer.citations] == [
         ("deployment.md", "Deploying to Production > Rolling back")
     ]
+
+
+def test_the_system_prompt_is_about_the_provided_documents_not_one_company():
+    import json
+
+    import anthropic
+    import httpx2
+
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        reply = {
+            "id": "m",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-opus-5-5",
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "content": [{"type": "text", "text": "Answer."}],
+        }
+        return httpx2.Response(200, json=reply)
+
+    client = anthropic.Anthropic(
+        api_key="k", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(handler))
+    )
+    ClaudeAnswerer(client, "claude-opus-5-5", "medium").answer("How do I roll back?", RESULTS)
+
+    system = sent[0]["system"]
+    system = system if isinstance(system, str) else " ".join(block["text"] for block in system)
+    for word in ("handbook", "employee", "company"):
+        assert word not in system.lower()
+    assert "provided documents" in system and "only" in system and "not find" in system
+    assert "handbook" not in NOT_FOUND.lower()

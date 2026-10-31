@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from conftest import index_state
-from sourced.pipeline import IndexBindingError
+from sourced.pipeline import DocumentReadError, IndexBindingError
 
 
 def write(folder, name, section, body):
@@ -145,7 +145,7 @@ def test_a_failed_ingest_removes_nothing(make_pipeline, docs):
     (docs / "laptops.md").unlink()
     (docs / "broken.md").write_bytes(b"# Broken\n\n\xff\xfe not UTF-8\n")
 
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(DocumentReadError, match=r"broken\.md.*UTF-8"):
         pipeline.ingest(docs)
 
     assert pipeline.index.sources() == ["deploy.md", "laptops.md"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ from .store import REBUILD, Index, IndexBusyError, IndexConfigError
 
 __all__ = [
     "DocumentLinkError",
+    "DocumentReadError",
+    "UnsupportedDocumentError",
     "IndexBindingError",
     "IndexBusyError",
     "IndexConfigError",
@@ -32,6 +35,14 @@ class IndexBindingError(ValueError):
 
 class DocumentLinkError(ValueError):
     """The documents to ingest include a symbolic link, which ingest doesn't follow."""
+
+
+class UnsupportedDocumentError(ValueError):
+    """A single file to ingest isn't a supported document, or sits in a hidden folder."""
+
+
+class DocumentReadError(ValueError):
+    """A document couldn't be read as UTF-8 text."""
 
 
 @dataclass
@@ -78,27 +89,40 @@ class Pipeline:
         with IndexBusyError instead of interleaving with this one. A failed run can leave
         some documents written: only a run that returns completes the index.
 
-        Symbolic links inside the folder (files, directories, broken ones), or a single file
-        that is a link, stop the run with DocumentLinkError before the index is touched, so
-        a link can't pull in text from outside the folder. The folder itself may be reached
-        through a link. Checked once up front: not a guard against files swapped mid-run.
+        Documents are the files with a supported suffix (any case), skipping everything hidden
+        inside the folder: a file or folder whose name starts with "." is neither read nor
+        entered (.git, .venv, ...). The folder itself may be hidden. A single file must follow
+        the same rules, or UnsupportedDocumentError is raised.
+
+        Symbolic links among the visible entries (files, directories, broken ones), or a
+        single file that is a link, stop the run with DocumentLinkError before the index is
+        touched, so a link can't pull in text from outside the folder. The folder itself may
+        be reached through a link. Checked once up front: not a guard against files swapped
+        mid-run. A file that can't be read raises DocumentReadError before any removal.
         """
         if not path.exists():
             raise FileNotFoundError(f"{path} does not exist")
         with self.index.ingest_lock():
             root = self.index.meta().get("root")
-            _refuse_links(path, Path(root) if root else path.parent.resolve())
-            return self._ingest(path, self._folder(path))
+            files = _documents(path, Path(root) if root else path.parent.resolve())
+            return self._ingest(path, self._folder(path), files)
 
-    def _ingest(self, path: Path, folder: Path) -> IngestReport:
-        if path.is_file():
-            files = [path.resolve()]
-        else:
-            files = sorted(p for p in folder.rglob("*") if p.suffix in SUPPORTED_SUFFIXES and p.is_file())
+    def _ingest(self, path: Path, folder: Path, files: list[Path]) -> IngestReport:
         report = IngestReport()
         for file in files:
             source = file.relative_to(folder).as_posix()
-            text = file.read_text(encoding="utf-8")
+            try:
+                text = file.read_text(encoding="utf-8")
+            except UnicodeDecodeError as exc:
+                raise DocumentReadError(
+                    f"{source} is not valid UTF-8 text (byte {exc.start}); convert or remove it and ingest again. "
+                    "Files before it in this run may be updated; no document was removed."
+                ) from None
+            except OSError as exc:
+                raise DocumentReadError(
+                    f"{source} could not be read ({exc.strerror or type(exc).__name__}). "
+                    "Files before it in this run may be updated; no document was removed."
+                ) from None
             sha = hashlib.sha256(text.encode()).hexdigest()
             previous = self.index.document_hash(source)
             if previous == sha:
@@ -182,27 +206,63 @@ class Pipeline:
         )
 
 
-def _refuse_links(path: Path, root: Path) -> None:
-    """Raises DocumentLinkError for a link between ``root`` (the folder, however it was reached) and the documents."""
+def _is_hidden(name: str) -> bool:
+    return name.startswith(".")
+
+
+def _documents(path: Path, root: Path) -> list[Path]:
+    """The files to ingest, after refusing links, hidden paths and unsupported files.
+
+    ``root`` is the folder the documents belong to, however it was reached. For a folder,
+    hidden entries are pruned before the walk enters them, so nothing under .git or .venv is
+    listed, read or checked for links. A folder that can't be listed stops the run.
+    """
+    links: list[Path] = []
     if path.is_dir():
-        links = sorted(p for p in path.resolve().rglob("*") if p.is_symlink())
-    elif path.is_symlink():
-        links = [path]
+        files = []
+
+        def stop(error: OSError) -> None:
+            raise error  # a folder we can't list must not look like deleted documents
+
+        for current, dirs, names in os.walk(path.resolve(), onerror=stop):
+            here = Path(current)
+            dirs[:] = sorted(d for d in dirs if not _is_hidden(d))
+            links += [here / d for d in dirs if (here / d).is_symlink()]
+            dirs[:] = [d for d in dirs if not (here / d).is_symlink()]
+            for name in sorted(n for n in names if not _is_hidden(n)):
+                if (here / name).is_symlink():
+                    links.append(here / name)
+                elif Path(name).suffix.lower() in SUPPORTED_SUFFIXES:
+                    files.append(here / name)
+        files.sort()
     else:
-        # A single file: also every directory between it and the folder ("docs/shortcut/a.md").
-        # A file outside the folder is left to the folder check, whatever links lie above it.
-        links, between = [], []
-        for parent in path.absolute().parents:  # absolute() keeps the links that resolve() would follow
-            if parent.resolve() == root:
-                links = [p for p in between if p.is_symlink()][-1:]
-                break
-            between.append(parent)
+        files = [path.resolve()]
+        if path.is_symlink():
+            links = [path]
+        else:
+            # Every directory between the file and the folder ("docs/shortcut/a.md") counts too.
+            # A file outside the folder is left to the folder check, whatever links lie above it.
+            between = []
+            for parent in path.absolute().parents:  # absolute() keeps the links that resolve() would follow
+                if parent.resolve() == root:
+                    links = [p for p in between if p.is_symlink()][-1:]
+                    if any(_is_hidden(part) for part in path.absolute().relative_to(parent).parts):
+                        raise UnsupportedDocumentError(
+                            f"{path} is inside a hidden file or folder; sourced only reads visible documents"
+                        )
+                    break
+                between.append(parent)
+        if not links and path.suffix.lower() not in SUPPORTED_SUFFIXES:
+            raise UnsupportedDocumentError(
+                f"{path} is not a supported document (use {', '.join(sorted(SUPPORTED_SUFFIXES))}, in any case)"
+            )
     if links:
         more = f" (and {len(links) - 1} more)" if len(links) > 1 else ""
         raise DocumentLinkError(
-            f"{links[0]} is a symbolic link{more}. sourced doesn't follow links in the document folder; "
+            f"{sorted(links)[0]} is a symbolic link{more}. sourced doesn't follow links in the document folder; "
             "copy the file in or remove the link, then ingest again. Nothing was changed."
         )
+    return files
 
 
 def build_pipeline(settings: Settings, with_reranker: bool | None = None) -> Pipeline:
@@ -218,7 +278,9 @@ def build_pipeline(settings: Settings, with_reranker: bool | None = None) -> Pip
     use_reranker = settings.rerank if with_reranker is None else with_reranker
     reranker = CrossEncoderReranker(settings.rerank_model) if use_reranker else None
     answerer: Answerer = (
-        ClaudeAnswerer(anthropic.Anthropic(), settings.claude_model, settings.claude_effort)
+        # No SDK retries: each answer is at most one billed request (a refusal fallback, if the
+        # API runs one, happens inside that request). 60 s is the SDK's timeout per HTTP attempt.
+        ClaudeAnswerer(anthropic.Anthropic(max_retries=0, timeout=60.0), settings.claude_model, settings.claude_effort)
         if settings.answerer == "claude"
         else ExtractiveAnswerer()
     )
