@@ -51,8 +51,8 @@ Unless the row says otherwise, on the bundled sample handbook: 14 short document
 | The right passage is retrieved | hit@5 **0.98** (hybrid + rerank), 43 answerable questions; CI fails below 0.95 | retrieval only, not answer accuracy |
 | …also on real documentation it wasn't written for | **Prometheus docs** (23 pages, 417 chunks, 24 answerable questions): hybrid + rerank hit@1 0.92, hit@5 1.00; BM25 alone hit@5 0.96 | one external corpus, questions written by the developer's assistant; not in CI ([details](docs/evaluation.md#external-corpus-prometheus-documentation)) |
 | Retrieval is fast enough for interactive use | Prometheus docs, 417 chunks: hybrid 3.1–3.2 ms p50, hybrid + rerank 296–332 ms p50 (3 rounds) | one laptop, one query at a time; not a load test ([performance](docs/performance.md)) |
-| Claude answers from the retrieved passages, with checkable citations | 12 questions on 2026-10-29: facts right on all 10 answerable ones (one added unsupported phrase), both unanswerable ones declined, two planted prompt injections not followed; $0.14 from response usage | small one-off sample, not an accuracy rate |
-| The service behaves as documented | 227 offline tests; CI builds the Docker image and queries it | the CI smoke test uses the extractive mode |
+| Claude answers from the retrieved passages, with checkable citations | Two runs of 12 questions (2026-10-29 with the earlier prompt, 2026-10-31 with the current one): main facts right on all 10 answerable ones in both, both unanswerable ones declined, planted prompt injections not followed (though one citation quotes the planted text); $0.14 and $0.13 from response usage ([records](eval/live-claude/README.md)) | small samples, about one call per question; not an accuracy rate |
+| The service behaves as documented | 236 offline tests; CI builds the Docker image and queries it | the CI smoke test uses the extractive mode |
 
 **Costs** on an Apple M5 laptop (2026-10-29), measured one query or one ingest at a time: no concurrency, not
 a load test.
@@ -183,7 +183,7 @@ answer is an error too, never shown as an answer.
 ## Tests
 
 ```bash
-pytest -q        # 227 tests, ~3 s, no network: a hashing embedder stands in for the model
+pytest -q        # 236 tests, ~3 s, no network: a hashing embedder stands in for the model
 ruff check src tests bench eval docs
 ```
 
@@ -214,6 +214,7 @@ src/sourced/
 data/handbook/      sample corpus: a fictional robotics company's engineering handbook
 eval/               labelled questions for the handbook
 eval/prometheus/    external corpus (Prometheus docs, Apache-2.0), its questions, scripts and results
+eval/live-claude/   public records of the live Claude checks (one folder per run), and the script that checks them
 docs/               demo, evaluation, performance, index management, configuration
 bench/              performance benchmark script and its published results
 ```
